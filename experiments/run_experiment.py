@@ -1,7 +1,7 @@
-from fairpp.postprocessor import FairPostProcessor
+from fairpp.postprocessor import FairPostProcessor, LossFairPostProcessor
 from fairpp.model import ThresholdMarginModel, ThresholdNormalizedMarginModel, ThresholdRatioModel, ThresholdLogRatioModel
 from fairpp.objectives import CrossEntropyObjective, DemographicParityObjective
-from fairpp.selectors import TopsisSelector, ZenithSelector
+from fairpp.selectors import TopsisSelector, ZenithSelector, LossTopsisSelector, LossZenithSelector
 from fairpp.metrics import AccuracyMetric, PrecisionMetric, RecallMetric, DemographicParityMetric, DEOMetric
 
 from pprep.pipeline import prepare_dataset_from_yaml
@@ -51,7 +51,7 @@ def calculate_metrics(y_true, y_pred, sensitive_features):
     }
 #-----------------------------------------------------------------------------
 
-data = prepare_dataset_from_yaml("adult")
+data = prepare_dataset_from_yaml("bank")
 
 X_train = data['X_train']
 X_test = data['X_test']
@@ -72,16 +72,24 @@ model.fit(X_train, y_train)
 probs_val = model.predict_proba(X_val)
 probs_test = model.predict_proba(X_test)
 
-motor = ThresholdNormalizedMarginModel(num_classes=2, alpha=10)
+motor = ThresholdLogRatioModel(num_classes=2, alpha=.5)
 
 post = FairPostProcessor(
     model=motor,
     objectives=[CrossEntropyObjective(), DemographicParityObjective()],
     selector=ZenithSelector(),
-    selection_metrics={"acc": AccuracyMetric(), "rec": RecallMetric(), "prec": PrecisionMetric(), "ddp": DemographicParityMetric(), "deo": DEOMetric()},
+    selection_metrics={"rec": RecallMetric(), "deo": DEOMetric()},
     lr=1e-3,
-    epochs=1000
+    epochs=5000
 )
+
+'''post = LossFairPostProcessor(
+    model=motor,
+    objectives=[CrossEntropyObjective(), DemographicParityObjective()],
+    selector=LossZenithSelector(),
+    lr=1e-3,
+    epochs=5000
+)'''
 
 post.fit(probs_val, y_val, s_val)
 
@@ -95,3 +103,6 @@ print()
 print("Pontos da fronteira de Pareto:")
 print(np.asarray(post.pareto_front_).shape)
 print(np.asarray(post.pareto_front_))
+print()
+print("Direção da métricas", post.metric_directions_)
+print("Nome da métricas", post.metric_names_)
