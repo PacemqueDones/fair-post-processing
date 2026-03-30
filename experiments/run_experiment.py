@@ -75,13 +75,22 @@ model.fit(X_train, y_train)
 probs_val = model.predict_proba(X_val)
 probs_test = model.predict_proba(X_test)
 
-motor = ThresholdLogRatioModel(num_classes=2, alpha=.5)
+motor = ThresholdLogRatioModel(num_classes=2, alpha=5)
 
 post = FairPostProcessor(
     model=motor,
-    objectives=[CrossEntropyObjective(), DemographicParityObjective()],
+    objectives=[
+        CrossEntropyObjective(),
+        DemographicParityObjective( lambda_ = .5),
+        ],
     selector=TopsisSelector(),
-    selection_metrics=[AccuracyMetric(), PrecisionMetric(),RecallMetric() ,DemographicParityMetric(), DEOMetric()],
+    selection_metrics=[
+        AccuracyMetric(),
+        PrecisionMetric(),
+        RecallMetric(),
+        DemographicParityMetric(),
+        DEOMetric()
+        ],
     preserve_performance=True,
     lr=1e-3,
     epochs=500
@@ -100,11 +109,8 @@ print()
 print("Pontos da fronteira de Pareto:")
 print(np.asarray(post.pareto_front_).shape)
 print(np.asarray(post.pareto_front_))
-print()
-print("Todos os pontos avaliados:")
-print(post.pareto_points_[::-1][0:50])
 '''print()
 print("Direção da métricas", post.metric_directions_)
-print("Nome da métricas", post.metric_names_)
+print("Nome das métricas", post.metric_names_)
 print()
 print("loss_history", post.loss_history_)'''
