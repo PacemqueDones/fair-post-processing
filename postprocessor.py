@@ -96,7 +96,9 @@ class FairPostProcessor:
         y_true = torch.tensor(y_true, dtype=torch.long)
         sensitive_attr = torch.tensor(sensitive_attr, dtype=torch.long)
 
-        self.performance_reference_metrics_ = self._build_performance_reference_metrics(probs, y_true, sensitive_attr)
+        self.performance_reference_metrics_ = self._build_performance_reference_metrics(
+            probs, y_true, sensitive_attr
+        )
 
         if self.preserve_performance:
             perf_obj = self._build_performance_preservation_objective(
@@ -106,9 +108,14 @@ class FairPostProcessor:
             )
             active_objectives = list(self.objectives) + [perf_obj]
         else:
-            active_objectives = self.objectives
+            active_objectives = list(self.objectives)
+
+        params = [p for p in self.model.parameters() if p.requires_grad]
 
         for epoch in range(self.epochs):
+            # -------------------------------------------------
+            # Forward
+            # -------------------------------------------------
             scores = self.model(probs)
 
             losses = []
@@ -117,10 +124,11 @@ class FairPostProcessor:
             for obj in active_objectives:
                 loss = obj(scores, y_true, sensitive_attr)
                 losses.append(loss)
-                loss_dict[obj.name] = loss.item()
+                loss_dict[obj.name] = float(loss.detach().cpu())
 
-            '''params = [p for p in self.model.parameters() if p.requires_grad]
-
+            # -------------------------------------------------
+            # Gradientes individuais para diagnóstico
+            # -------------------------------------------------
             grad_norms = {}
             grads_per_obj = {}
 
@@ -146,19 +154,35 @@ class FairPostProcessor:
                     grad_norms[obj.name] = 0.0
                     grads_per_obj[obj.name] = None
 
-            if (
-                grads_per_obj["cross_entropy"] is not None
-                and grads_per_obj["demographic_parity"] is not None
-            ):
-                g1 = grads_per_obj["cross_entropy"]
-                g2 = grads_per_obj["demographic_parity"]
+            self.grad_norm_history_.append(grad_norms)
 
-                cos = torch.dot(g1, g2) / (torch.norm(g1) * torch.norm(g2) + 1e-12)
-                cosine_similarity = float(cos.detach().cpu())
+            # -------------------------------------------------
+            # Similaridade cosseno entre gradientes
+            # -------------------------------------------------
+            cosine_dict = {}
+
+            if len(active_objectives) == 2:
+                name1 = active_objectives[0].name
+                name2 = active_objectives[1].name
+
+                g1 = grads_per_obj.get(name1)
+                g2 = grads_per_obj.get(name2)
+
+                if g1 is not None and g2 is not None:
+                    cos = torch.dot(g1, g2) / (torch.norm(g1) * torch.norm(g2) + 1e-12)
+                    cosine_dict[f"{name1}__{name2}"] = float(cos.detach().cpu())
+                else:
+                    cosine_dict[f"{name1}__{name2}"] = None
+
             else:
-                cosine_similarity = None'''
+                # opcional: guardar None ou dicionário vazio quando há mais de 2 objetivos
+                cosine_dict = {}
 
-            params = [p for p in self.model.parameters() if p.requires_grad]
+            self.cosine_similarity_history_.append(cosine_dict)
+
+            # -------------------------------------------------
+            # Combinação multiobjetivo
+            # -------------------------------------------------
             total_loss, alphas = self.descent_.combine(losses, params)
 
             self.total_loss_history_.append(float(total_loss.detach().cpu()))
@@ -166,12 +190,35 @@ class FairPostProcessor:
                 alphas.detach().cpu().tolist() if torch.is_tensor(alphas) else list(alphas)
             )
 
+            # -------------------------------------------------
+            # Norma do passo dos thresholds
+            # -------------------------------------------------
+            old_thresholds = self.model.thresholds.detach().clone()
+
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
 
+            new_thresholds = self.model.thresholds.detach().clone()
+            step_norm = torch.norm(new_thresholds - old_thresholds).item()
+            self.step_norm_history_.append(step_norm)
+
+            # -------------------------------------------------
+            # Histórico das losses e delta entre épocas
+            # -------------------------------------------------
             self.loss_history_.append(loss_dict)
 
+            if len(self.loss_history_) == 1:
+                self.loss_delta_history_.append({k: 0.0 for k in loss_dict})
+            else:
+                prev = self.loss_history_[-2]
+                curr = self.loss_history_[-1]
+                delta = {k: curr[k] - prev[k] for k in curr}
+                self.loss_delta_history_.append(delta)
+
+            # -------------------------------------------------
+            # Avaliação consistente após update
+            # -------------------------------------------------
             with torch.no_grad():
                 scores_eval = self.model(probs)
                 y_pred = torch.argmax(scores_eval, dim=1)
@@ -187,8 +234,10 @@ class FairPostProcessor:
                         scores=scores_eval
                     )
 
-                    metric_dict[metric.name] = value
-                    point.append(value)
+                    # força float simples para evitar problemas depois
+                    metric_value = float(value)
+                    metric_dict[metric.name] = metric_value
+                    point.append(metric_value)
 
                 self.metric_history_.append(metric_dict)
                 self.pareto_points_.append(point)
@@ -196,30 +245,53 @@ class FairPostProcessor:
                     self.model.thresholds.detach().clone()
                 )
 
+        # -------------------------------------------------
+        # Metadados das métricas
+        # -------------------------------------------------
         self.metric_names_ = [metric.name for metric in self.selection_metrics]
         self.metric_directions_ = [metric.direction for metric in self.selection_metrics]
         self.metric_type_ = [metric.type for metric in self.selection_metrics]
 
+        # -------------------------------------------------
+        # Fronteira de Pareto
+        # -------------------------------------------------
         front_idx = pareto_front(self.pareto_points_, self.metric_directions_)
         self.pareto_front_ = [self.pareto_points_[i] for i in front_idx]
         pareto_metric_history = [self.metric_history_[i] for i in front_idx]
 
+        # -------------------------------------------------
+        # Filtro de performance + seleção final
+        # -------------------------------------------------
         if self.preserve_performance:
             self.feasible_filter = PerformanceRangeFilter(self.performance_tolerance)
-            feasible_idx, filter_info  = self.feasible_filter.get_indices(pareto_metric_history, self.selection_metrics, self.performance_reference_metrics_)
+
+            feasible_idx, filter_info = self.feasible_filter.get_indices(
+                pareto_metric_history,
+                self.selection_metrics,
+                self.performance_reference_metrics_
+            )
+
             self.feasible_pareto_front_ = [self.pareto_front_[i] for i in feasible_idx]
-            local_idx = self.selector.select(self.feasible_pareto_front_, self.metric_directions_)
+
+            local_idx = self.selector.select(
+                self.feasible_pareto_front_,
+                self.metric_directions_
+            )
+
             selected_pareto_idx = feasible_idx[local_idx]
             global_idx = front_idx[selected_pareto_idx]
 
             self.filter_info_ = filter_info
             self.fallback_used_ = filter_info["fallback_used"]
             self.fallback_reason_ = filter_info["fallback_reason"]
-        
+
         else:
             local_idx = self.selector.select(self.pareto_front_, self.metric_directions_)
             global_idx = front_idx[local_idx]
 
+        # -------------------------------------------------
+        # Melhor solução final
+        # -------------------------------------------------
         self.best_thresholds_ = self.threshold_history_[global_idx]
         self.best_metrics_ = self.metric_history_[global_idx]
         self.best_losses_ = self.loss_history_[global_idx]
