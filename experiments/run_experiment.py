@@ -78,13 +78,15 @@ probs_val = model.predict_proba(X_val)
 probs_test = model.predict_proba(X_test)
 
 motor = ThresholdLogRatioModel(num_classes=2, alpha=0.1)
+eo = EqualityOpportunityObjective(fairness_weight = 50)
+
 
 post = FairPostProcessor(
     model=motor,
     objectives=[
         CrossEntropyObjective(),
         #DemographicParityObjective(fairness_weight = 5),
-        EqualityOpportunityObjective(fairness_weight = 50)
+        eo
         ],
     selector=ZenithSelector(),
     selection_metrics=[
