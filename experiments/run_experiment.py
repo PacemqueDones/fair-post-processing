@@ -1,12 +1,14 @@
-from fairpp.postprocessor import FairPostProcessor, LossFairPostProcessor
+from fairpp.postprocessor import FairPostProcessor
 from fairpp.model import ThresholdMarginModel, ThresholdNormalizedMarginModel, ThresholdRatioModel, ThresholdLogRatioModel
 from fairpp.objectives.objectives import CrossEntropyObjective, DemographicParityObjective, EqualityOpportunityObjective, DemographicParityKLObjective, EqualityOpportunityKLObjective
-from fairpp.selectors import TopsisSelector, ZenithSelector, LossTopsisSelector, LossZenithSelector
-from fairpp.metrics.metrics import AccuracyMetric, PrecisionMetric, RecallMetric, F1ScoreMetric,DemographicParityMetric, DEOMetric
+from fairpp.selectors.selectors import TopsisSelector, ZenithSelector
+from fairpp.metrics.metrics import AccuracyMetric, PrecisionMetric, RecallMetric, F1ScoreMetric, DemographicParityMetric, DEOMetric
 
 from pprep.pipeline import prepare_dataset_from_yaml
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
+
+from fairpp.diagnose import diagnose_postprocessor
 
 import numpy as np
 
@@ -75,42 +77,40 @@ model.fit(X_train, y_train)
 probs_val = model.predict_proba(X_val)
 probs_test = model.predict_proba(X_test)
 
-motor = ThresholdLogRatioModel(num_classes=2, alpha=5)
+motor = ThresholdLogRatioModel(num_classes=2, alpha=0.1)
 
 post = FairPostProcessor(
     model=motor,
     objectives=[
         CrossEntropyObjective(),
-        DemographicParityObjective( lambda_ = .5),
+        #DemographicParityObjective(fairness_weight = 5),
+        EqualityOpportunityObjective(fairness_weight = 50)
         ],
-    selector=TopsisSelector(),
+    selector=ZenithSelector(),
     selection_metrics=[
-        AccuracyMetric(),
-        PrecisionMetric(),
+        AccuracyMetric(),  
         RecallMetric(),
+        PrecisionMetric(),
         DemographicParityMetric(),
         DEOMetric()
         ],
-    preserve_performance=True,
+    preserve_performance=False,
+    performance_tolerance=0.1,
     lr=1e-3,
     epochs=500
 )
 
 post.fit(probs_val, y_val, s_val)
-
 preds = post.predict(probs_test)
 
-print()
-print("Thresholds: ", post.get_thresholds())
-print()
-print("Soloção com post-processing: ", calculate_metrics(y_test, preds, s_test))
-print("Soloção sem post-processing: ", calculate_metrics(y_test, model.predict(X_test), s_test))
-print()
-print("Pontos da fronteira de Pareto:")
-print(np.asarray(post.pareto_front_).shape)
-print(np.asarray(post.pareto_front_))
-'''print()
-print("Direção da métricas", post.metric_directions_)
-print("Nome das métricas", post.metric_names_)
-print()
-print("loss_history", post.loss_history_)'''
+diagnose_postprocessor(
+    post=post,
+    model=model,
+    X_val=X_val,
+    y_val=y_val,
+    s_val=s_val,
+    X_test=X_test,
+    y_test=y_test,
+    s_test=s_test,
+    preds=preds
+)
