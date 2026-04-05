@@ -8,7 +8,7 @@ from pprep.pipeline import prepare_dataset_from_yaml
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
 
-#from fairpp..diagnose import diagnose_postprocessor
+from fairpp.diagnose import diagnose_postprocessor
 
 import numpy as np
 
@@ -84,7 +84,6 @@ post = FairPostProcessor(
     objectives=[CrossEntropyObjective(), DemographicParityObjective()],
     selector=TopsisSelector(),
     selection_metrics=[AccuracyMetric(), PrecisionMetric(),RecallMetric() ,DemographicParityMetric(), DEOMetric()],
-    preserve_performance=False,
     lr=1e-3,
     epochs=500
 )
@@ -101,9 +100,13 @@ print("Soloção sem post-processing: ", calculate_metrics(y_test, model.predict
 print()
 print(np.asarray(post.pareto_front_).shape)
 print(np.asarray(post.pareto_front_))
+print()
+print(post.cosine_similarity_history_)
+print()
+print("alpha history: ")
+print(post.alpha_history_)
 
-
-'''diagnose_postprocessor(
+diagnose_postprocessor(
     post=post,
     model=model,
     X_val=X_val,
@@ -113,4 +116,4 @@ print(np.asarray(post.pareto_front_))
     y_test=y_test,
     s_test=s_test,
     preds=preds
-)'''
+)
