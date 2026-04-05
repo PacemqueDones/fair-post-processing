@@ -1,8 +1,8 @@
 import torch
 from .pareto import pareto_front
-from fairpp.optimization.multiobjective import CommonDescent
-from .soft_metrics import SOFT_METRIC_MAP
-from .objectives.objectives import PerformancePreservationObjective
+from optimization.multiobjective import CommonDescent
+from soft_metrics import SOFT_METRIC_MAP
+from objectives.objectives import PerformancePreservationObjective
 
 class FairPostProcessor:
     def __init__(self, model, objectives, selector, selection_metrics: dict | None =None, preserve_performance: bool = False, lr=1e-2, epochs=100):

@@ -8,7 +8,7 @@ from pprep.pipeline import prepare_dataset_from_yaml
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
 
-from fairpp.diagnose import diagnose_postprocessor
+#from fairpp..diagnose import diagnose_postprocessor
 
 import numpy as np
 
@@ -92,7 +92,18 @@ post = FairPostProcessor(
 post.fit(probs_val, y_val, s_val)
 preds = post.predict(probs_test)
 
-diagnose_postprocessor(
+print(post.get_thresholds())
+print()
+print("Thresholds: ", post.get_thresholds())
+print()
+print("Soloção com post-processing: ", calculate_metrics(y_test, preds, s_test))
+print("Soloção sem post-processing: ", calculate_metrics(y_test, model.predict(X_test), s_test))
+print()
+print(np.asarray(post.pareto_front_).shape)
+print(np.asarray(post.pareto_front_))
+
+
+'''diagnose_postprocessor(
     post=post,
     model=model,
     X_val=X_val,
@@ -102,4 +113,4 @@ diagnose_postprocessor(
     y_test=y_test,
     s_test=s_test,
     preds=preds
-)
+)'''
