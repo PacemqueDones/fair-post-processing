@@ -17,7 +17,9 @@ class GradientDiagnostics:
         if g1 is None or g2 is None:
             return {f"{name1}__{name2}": None}
 
-        cos = torch.dot(g1, g2) / (torch.norm(g1) * torch.norm(g2) + 1e-12)
+        if (torch.norm(g1) * torch.norm(g2) < 1e-10):
+            return {f"{name1}__{name2}": 0.0}
+        cos = torch.dot(g1, g2) / (torch.norm(g1) * torch.norm(g2))
         return {f"{name1}__{name2}": float(cos.detach().cpu())}
 
     def collect(self, losses, params):

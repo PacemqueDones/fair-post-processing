@@ -46,18 +46,31 @@ class TopsisSelector:
         return int(np.argmax(closeness))
 
 class ZenithSelector:
-    def __init__(self, weights=None):
+    def __init__(self, weights=None, normalize='standard'):
         self.weights = weights
+        self.normalize = normalize
+
     def select(self, points, directions):
         X = np.array(points, dtype=float)
         self.weights = np.ones(X.shape[1]) if self.weights is None else np.array(self.weights)
 
-        # min-max por coluna
-        mins = X.min(axis=0)
-        maxs = X.max(axis=0)
-        denom = maxs - mins
-        denom[denom == 0] = 1.0
-        Xn = (X - mins) / denom
+        if self.normalize == 'min-max':
+            # Rescaling (Min-Max Normalization)
+            mins = X.min(axis=0)
+            maxs = X.max(axis=0)
+            denom = maxs - mins
+            denom[denom == 0] = 1.0
+            Xn = (X - mins) / denom
+
+        elif self.normalize == 'standard':
+            # Standardization (Z-Score Normalization)
+            means = X.mean(axis=0)
+            stds = X.std(axis=0)
+            stds[stds == 0] = 1.0
+            Xn = (X - means) / stds
+        
+        else:
+            Xn = X  # Sem normalização
 
         zenith = []
         for j, direction in enumerate(directions):

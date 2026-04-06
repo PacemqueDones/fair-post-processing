@@ -11,7 +11,7 @@ class CrossEntropyObjective(Objective):
 class DemographicParityObjective(Objective):
     name = "demographic_parity"
 
-    def __init__(self, fairness_weight=1.0, ce_weight=0.1):
+    def __init__(self, fairness_weight=1.0, ce_weight=0.001):
         self.fairness_weight = fairness_weight
         self.ce_weight = ce_weight
 
@@ -33,7 +33,7 @@ class DemographicParityObjective(Objective):
 class EqualityOpportunityObjective(Objective):
     name = "equality_opportunity"
 
-    def __init__(self, fairness_weight=1.0, ce_weight=0.1):
+    def __init__(self, fairness_weight=1.0, ce_weight=0.001):
         self.fairness_weight = fairness_weight
         self.ce_weight = ce_weight
 
@@ -57,7 +57,7 @@ class EqualityOpportunityObjective(Objective):
 class DemographicParityKLObjective(Objective):
     name = "demographic_parity_kl"
 
-    def __init__(self, fairness_weight=1.0, ce_weight=0.1, eps=1e-7):
+    def __init__(self, fairness_weight=1.0, ce_weight=0.001, eps=1e-7):
         self.fairness_weight = fairness_weight
         self.ce_weight = ce_weight
         self.eps = eps
@@ -88,7 +88,7 @@ class DemographicParityKLObjective(Objective):
 class EqualityOpportunityKLObjective(Objective):
     name = "equality_opportunity_kl"
 
-    def __init__(self, fairness_weight=1.0, ce_weight=0.1, eps=1e-7):
+    def __init__(self, fairness_weight=1.0, ce_weight=0.001, eps=1e-7):
         self.fairness_weight = fairness_weight
         self.ce_weight = ce_weight
         self.eps = eps
@@ -117,23 +117,3 @@ class EqualityOpportunityKLObjective(Objective):
         ce = F.cross_entropy(scores, y_true)
 
         return self.fairness_weight * fairness + self.ce_weight * ce
-
-class PerformancePreservationObjective(Objective):
-    name = "performance_preservation"
-
-    def __init__(self, differentiable_metrics, reference_values, lambda_ = 0.5, weights=None):
-        self.metrics = differentiable_metrics
-        self.reference_values = reference_values
-        self.weights = weights or {}
-        self.lambda_ = lambda_
-
-    def __call__(self, scores, y_true, sensitive_attr):
-        loss = torch.tensor(0.0, device=scores.device)
-
-        for metric in self.metrics:
-            current = metric(y_true=y_true, scores=scores, sensitive_attr=sensitive_attr)
-            target = self.reference_values[metric.name].to(scores.device)
-            weight = self.weights.get(metric.name, 1.0)
-            loss = loss + weight * (current - target) ** 2
-
-        return self.lambda_ * loss

@@ -77,15 +77,16 @@ model.fit(X_train, y_train)
 probs_val = model.predict_proba(X_val)
 probs_test = model.predict_proba(X_test)
 
-motor = ThresholdLogRatioModel(num_classes=2, alpha=.5)
+motor = ThresholdMarginModel(num_classes=2, alpha=1)
 
 post = FairPostProcessor(
     model=motor,
-    objectives=[CrossEntropyObjective(), DemographicParityObjective()],
-    selector=TopsisSelector(),
+    objectives=[CrossEntropyObjective(), CrossEntropyObjective()],
+    selector=ZenithSelector(normalize='min-max'),
     selection_metrics=[AccuracyMetric(), PrecisionMetric(),RecallMetric() ,DemographicParityMetric(), DEOMetric()],
-    lr=1e-3,
-    epochs=500
+    lr=1e-2,
+    epochs=500,
+    track_gradients=True
 )
 
 post.fit(probs_val, y_val, s_val)
@@ -98,13 +99,6 @@ print()
 print("Soloção com post-processing: ", calculate_metrics(y_test, preds, s_test))
 print("Soloção sem post-processing: ", calculate_metrics(y_test, model.predict(X_test), s_test))
 print()
-print(np.asarray(post.pareto_front_).shape)
-print(np.asarray(post.pareto_front_))
-print()
-print(post.cosine_similarity_history_)
-print()
-print("alpha history: ")
-print(post.alpha_history_)
 
 diagnose_postprocessor(
     post=post,
