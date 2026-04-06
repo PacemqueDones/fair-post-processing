@@ -1,18 +1,21 @@
 import torch
 from .pareto import pareto_front
 from optimization.multiobjective import CommonDescent
+from gradients.gadients import GradientDiagnostics
 
 
 class FairPostProcessor:
-    def __init__(self, model, objectives, selector, selection_metrics: dict | None = None, lr=1e-2, epochs=100):
-        self.descent_ = CommonDescent()
-
+    def __init__(self, model, objectives, selector, selection_metrics: list | None = None, lr=1e-2, epochs=100, track_gradients: bool = False):
         self.model = model
         self.objectives = objectives
         self.selector = selector
         self.selection_metrics = selection_metrics or {}
         self.lr = lr
         self.epochs = epochs
+
+        self.descent_ = CommonDescent()
+        self.gradient_diagnostics = GradientDiagnostics(self.objectives) if track_gradients else None
+        self.track_gradients = track_gradients
 
         self.loss_history_ = []
         self.metric_history_ = []
@@ -43,48 +46,6 @@ class FairPostProcessor:
     def _get_trainable_params(self):
         return [p for p in self.model.parameters() if p.requires_grad]
     
-    def _collect_gradient_diagnostics(self, losses, params):
-        grad_norms = {}
-        grads_per_obj = {}
-
-        for obj, loss in zip(self.objectives, losses):
-            grads = torch.autograd.grad(
-                loss,
-                params,
-                retain_graph=True,
-                allow_unused=True
-            )
-
-            flat = [g.reshape(-1) for g in grads if g is not None]
-
-            if flat:
-                gvec = torch.cat(flat)
-                grad_norms[obj.name] = float(torch.norm(gvec).detach().cpu())
-                grads_per_obj[obj.name] = gvec.detach()
-            else:
-                grad_norms[obj.name] = 0.0
-                grads_per_obj[obj.name] = None
-
-        cosine_dict = self._compute_cosine_similarity(grads_per_obj)
-
-        return grad_norms, grads_per_obj, cosine_dict
-    
-    def _compute_cosine_similarity(self, grads_per_obj):
-        if len(self.objectives) != 2:
-            return {}
-
-        name1 = self.objectives[0].name
-        name2 = self.objectives[1].name
-
-        g1 = grads_per_obj.get(name1)
-        g2 = grads_per_obj.get(name2)
-
-        if g1 is None or g2 is None:
-            return {f"{name1}__{name2}": None}
-
-        cos = torch.dot(g1, g2) / (torch.norm(g1) * torch.norm(g2) + 1e-12)
-        return {f"{name1}__{name2}": float(cos.detach().cpu())}
-    
     def _record_diagnostics(self, grad_norms, cosine_dict, total_loss, alphas):
         self.grad_norm_history_.append(grad_norms)
         self.cosine_similarity_history_.append(cosine_dict)
@@ -106,7 +67,10 @@ class FairPostProcessor:
             losses, loss_dict = self._compute_losses(scores, y_true, sensitive_attr)
             params = self._get_trainable_params()
 
-            grad_norms, grads_per_obj, cosine_dict = self._collect_gradient_diagnostics(losses, params)
+            if self.track_gradients:
+                grad_norms, cosine_dict = self.gradient_diagnostics.collect(losses, params)
+            else:
+                grad_norms, cosine_dict = {}, {}
 
             total_loss, alphas = self.descent_.combine(losses, params)
 
@@ -116,7 +80,8 @@ class FairPostProcessor:
 
             self.loss_history_.append(loss_dict)
 
-            self._record_diagnostics(grad_norms, cosine_dict, total_loss, alphas)
+            if self.track_gradients:
+                self._record_diagnostics(grad_norms, cosine_dict, total_loss, alphas)
 
             with torch.no_grad():
                 scores_eval = self.model(probs)
@@ -163,6 +128,13 @@ class FairPostProcessor:
             self.model.thresholds.copy_(self.best_thresholds_)
             scores = self.model(probs)
             return torch.argmax(scores, dim=1).cpu().numpy()
+        
+    def predict_proba(self, probs):
+        probs = torch.tensor(probs, dtype=torch.float32)
+        with torch.no_grad():
+            self.model.thresholds.copy_(self.best_thresholds_)
+            scores = self.model(probs)
+            return torch.softmax(scores, dim=1).cpu().numpy()
 
     def get_thresholds(self):
         return self.best_thresholds_
