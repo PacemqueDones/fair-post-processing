@@ -3,12 +3,11 @@ from fairpp.model import ThresholdMarginModel, ThresholdNormalizedMarginModel, T
 from fairpp.objectives.objectives import CrossEntropyObjective, DemographicParityObjective, EqualityOpportunityObjective, DemographicParityKLObjective, EqualityOpportunityKLObjective
 from fairpp.selectors.selectors import TopsisSelector, ZenithSelector
 from fairpp.metrics.metrics import AccuracyMetric, PrecisionMetric, RecallMetric, F1ScoreMetric, DemographicParityMetric, DEOMetric
+from fairpp.diagnose import diagnose_postprocessor
 
 from pprep.pipeline import prepare_dataset_from_yaml
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
-
-from fairpp.diagnose import diagnose_postprocessor
 
 import numpy as np
 
@@ -77,15 +76,15 @@ model.fit(X_train, y_train)
 probs_val = model.predict_proba(X_val)
 probs_test = model.predict_proba(X_test)
 
-motor = ThresholdMarginModel(num_classes=2, alpha=1)
+motor = ThresholdRatioModel(num_classes=2, alpha=0.5)
 
 post = FairPostProcessor(
     model=motor,
-    objectives=[CrossEntropyObjective(), CrossEntropyObjective()],
-    selector=ZenithSelector(normalize='min-max'),
-    selection_metrics=[AccuracyMetric(), PrecisionMetric(),RecallMetric() ,DemographicParityMetric(), DEOMetric()],
-    lr=1e-2,
-    epochs=500,
+    objectives=[CrossEntropyObjective(), DemographicParityKLObjective(fairness_weight = 16.0, ce_weight=0.01)],
+    selector=ZenithSelector([1, 1, 2, 2]),
+    selection_metrics=[AccuracyMetric(), F1ScoreMetric(), DemographicParityMetric(), DEOMetric()],
+    lr=.5e-2,
+    epochs=300,
     track_gradients=True
 )
 
@@ -99,6 +98,8 @@ print()
 print("Soloção com post-processing: ", calculate_metrics(y_test, preds, s_test))
 print("Soloção sem post-processing: ", calculate_metrics(y_test, model.predict(X_test), s_test))
 print()
+for point in post.pareto_points_:
+    print(point)
 
 diagnose_postprocessor(
     post=post,

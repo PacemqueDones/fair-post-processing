@@ -1,5 +1,5 @@
 from fairpp.postprocessor import FairPostProcessor
-from fairpp.model import ThresholdLogRatioModel
+from fairpp.model import ThresholdRatioModel
 from fairpp.objectives.objectives import (
     CrossEntropyObjective,
     DemographicParityObjective,
@@ -7,7 +7,7 @@ from fairpp.objectives.objectives import (
     DemographicParityKLObjective,
     EqualityOpportunityKLObjective
 )
-from fairpp.selectors import TopsisSelector, ZenithSelector
+from fairpp.selectors.selectors import TopsisSelector, ZenithSelector
 from fairpp.metrics.metrics import (
     AccuracyMetric,
     PrecisionMetric,
@@ -110,15 +110,15 @@ def get_objective_name(objective):
 datasets = ["adult", "bank", "celeba", "compas", "dutch", "heart_failure"]
 
 objectives = [
-    DemographicParityObjective(),
-    EqualityOpportunityObjective(),
-    DemographicParityKLObjective(),
-    EqualityOpportunityKLObjective(),
-    [DemographicParityObjective(), EqualityOpportunityObjective()],
-    [DemographicParityKLObjective(), EqualityOpportunityKLObjective()],
+    DemographicParityObjective(fairness_weight = 8.0, ce_weight=0.01),
+    EqualityOpportunityObjective(fairness_weight = 8.0, ce_weight=0.01),
+    DemographicParityKLObjective(fairness_weight = 8.0, ce_weight=0.01),
+    EqualityOpportunityKLObjective(fairness_weight = 8.0, ce_weight=0.01),
+    [DemographicParityObjective(fairness_weight = 8.0, ce_weight=0.01), EqualityOpportunityObjective(fairness_weight = 8.0, ce_weight=0.01)],
+    [DemographicParityKLObjective(fairness_weight = 8.0, ce_weight=0.01), EqualityOpportunityKLObjective(fairness_weight = 8.0, ce_weight=0.01)],
 ]
 
-selectors = [TopsisSelector(), ZenithSelector()]
+selectors = [TopsisSelector([1, 1, 2, 2]), ZenithSelector([1, 1, 2, 2] )]
 
 results = []
 
@@ -152,7 +152,7 @@ for dataset in datasets:
                 probs_val = base_model.predict_proba(X_val)
                 probs_test = base_model.predict_proba(X_test)
 
-                motor = ThresholdLogRatioModel(num_classes=2, alpha=.5)
+                motor = ThresholdRatioModel(num_classes=2, alpha=.5)
 
                 current_objectives = (
                     [CrossEntropyObjective()] + objective
@@ -166,15 +166,13 @@ for dataset in datasets:
                     selector=selector,
                     selection_metrics=[
                         AccuracyMetric(),
-                        RecallMetric(),
-                        PrecisionMetric(),
                         F1ScoreMetric(),
                         DemographicParityMetric(),
                         DEOMetric()
                     ],
-                    preserve_performance=True,
-                    lr=1e-3,
-                    epochs=1000
+                    lr=.5e-2,
+                    epochs=300,
+                    track_gradients=False
                 )
 
                 post.fit(probs_val, y_val, s_val)

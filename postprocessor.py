@@ -1,7 +1,7 @@
 import torch
 from .pareto import pareto_front
-from optimization.multiobjective import CommonDescent
-from gradients.gradients import GradientDiagnostics
+from .optimization.multiobjective import CommonDescent
+from .gradients.gradients import GradientDiagnostics
 
 
 class FairPostProcessor:
