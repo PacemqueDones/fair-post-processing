@@ -81,7 +81,7 @@ motor = ThresholdRatioModel(num_classes=2, alpha=0.5)
 post = FairPostProcessor(
     model=motor,
     objectives=[CrossEntropyObjective(), DemographicParityKLObjective(fairness_weight = 16.0, ce_weight=0.01)],
-    selector=ZenithSelector([1, 1, 2, 2]),
+    selector=ZenithSelector([1, 1, 1, 1]),
     selection_metrics=[AccuracyMetric(), F1ScoreMetric(), DemographicParityMetric(), DEOMetric()],
     lr=.5e-2,
     epochs=300,

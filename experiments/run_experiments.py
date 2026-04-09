@@ -170,7 +170,7 @@ for dataset in datasets:
                         DemographicParityMetric(),
                         DEOMetric()
                     ],
-                    lr=.5e-2,
+                    lr=.5e-3,
                     epochs=300,
                     track_gradients=False
                 )
