@@ -14,7 +14,7 @@ from fairpp.metrics.metrics import (
     RecallMetric,
     F1ScoreMetric,
     DemographicParityMetric,
-    DEOMetric
+    EqualityOpportunityMetric
 )
 
 from pprep.pipeline import prepare_dataset_from_yaml

@@ -32,12 +32,12 @@ class FairPostProcessor:
         self.total_loss_history_ = []
         self.alpha_history_ = []
 
-    def _compute_losses(self, scores, y_true, sensitive_attr):
+    def _compute_losses(self, logits, y_true, sensitive_attr):
         losses = []
         loss_dict = {}
 
         for obj in self.objectives:
-            loss = obj(scores, y_true, sensitive_attr)
+            loss = obj(logits, y_true, sensitive_attr)
             losses.append(loss)
             loss_dict[obj.name] = loss.item()
 
@@ -62,9 +62,9 @@ class FairPostProcessor:
         sensitive_attr = torch.tensor(sensitive_attr, dtype=torch.long)
 
         for epoch in range(self.epochs):
-            scores = self.model(probs)
+            logits = self.model(probs)
 
-            losses, loss_dict = self._compute_losses(scores, y_true, sensitive_attr)
+            losses, loss_dict = self._compute_losses(logits, y_true, sensitive_attr)
             params = self._get_trainable_params()
 
             if self.track_gradients:
@@ -84,8 +84,8 @@ class FairPostProcessor:
                 self._record_diagnostics(grad_norms, cosine_dict, total_loss, alphas)
 
             with torch.no_grad():
-                scores_eval = self.model(probs)
-                y_pred = torch.argmax(scores_eval, dim=1)
+                logits_eval = self.model(probs)
+                y_pred = torch.argmax(logits_eval, dim=1)
 
                 metric_dict = {}
                 point = []
@@ -95,7 +95,6 @@ class FairPostProcessor:
                         y_true=y_true,
                         y_pred=y_pred,
                         sensitive_attr=sensitive_attr,
-                        scores=scores
                     )
 
                     metric_dict[metric.name] = value
@@ -126,15 +125,15 @@ class FairPostProcessor:
         probs = torch.tensor(probs, dtype=torch.float32)
         with torch.no_grad():
             self.model.thresholds.copy_(self.best_thresholds_)
-            scores = self.model(probs)
-            return torch.argmax(scores, dim=1).cpu().numpy()
+            logits = self.model(probs)
+            return torch.argmax(logits, dim=1).cpu().numpy()
         
     def predict_proba(self, probs):
         probs = torch.tensor(probs, dtype=torch.float32)
         with torch.no_grad():
             self.model.thresholds.copy_(self.best_thresholds_)
-            scores = self.model(probs)
-            return torch.softmax(scores, dim=1).cpu().numpy()
+            logits = self.model(probs)
+            return torch.softmax(logits, dim=1).cpu().numpy()
 
     def get_thresholds(self):
         return self.best_thresholds_

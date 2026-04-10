@@ -6,7 +6,7 @@ class AccuracyMetric(Metric):
     direction = "max"   # importante para TOPSIS/Pareto depois
     type = "performance"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None):
         return (y_pred == y_true).float().mean().item()
     
 class PrecisionMetric(Metric):
@@ -14,7 +14,7 @@ class PrecisionMetric(Metric):
     direction = "max"
     type = "performance"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None):
         pred_pos = (y_pred == 1)
 
         if pred_pos.sum() == 0:
@@ -31,7 +31,7 @@ class RecallMetric(Metric):
     direction = "max"
     type = "performance"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None):
         positive = (y_true == 1)
         if positive.sum() == 0:
             return 0.0
@@ -42,7 +42,7 @@ class F1ScoreMetric(Metric):
     direction = "max"
     type = "performance"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None):
         tp = ((y_pred == 1) & (y_true == 1)).sum().float()
         fp = ((y_pred == 1) & (y_true == 0)).sum().float()
         fn = ((y_pred == 0) & (y_true == 1)).sum().float()
@@ -68,7 +68,7 @@ class DemographicParityMetric(Metric):
     direction = "min"
     type = "fairness"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None):
         g0 = (sensitive_attr == 0)
         g1 = (sensitive_attr == 1)
 
@@ -79,12 +79,12 @@ class DemographicParityMetric(Metric):
         rate1 = y_pred[g1].float().mean()
         return torch.abs(rate0 - rate1).item()
     
-class DEOMetric(Metric):
+class EqualityOpportunityMetric(Metric):
     name = "deo"
     direction = "min"
     type = "fairness"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None):
         g0 = (sensitive_attr == 0) & (y_true == 1)
         g1 = (sensitive_attr == 1) & (y_true == 1)
 

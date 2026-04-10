@@ -2,7 +2,7 @@ from fairpp.postprocessor import FairPostProcessor
 from fairpp.model import ThresholdMarginModel, ThresholdNormalizedMarginModel, ThresholdRatioModel, ThresholdLogRatioModel
 from fairpp.objectives.objectives import CrossEntropyObjective, DemographicParityObjective, EqualityOpportunityObjective, DemographicParityKLObjective, EqualityOpportunityKLObjective
 from fairpp.selectors.selectors import TopsisSelector, ZenithSelector
-from fairpp.metrics.metrics import AccuracyMetric, PrecisionMetric, RecallMetric, F1ScoreMetric, DemographicParityMetric, DEOMetric
+from fairpp.metrics.metrics import AccuracyMetric, PrecisionMetric, RecallMetric, F1ScoreMetric, DemographicParityMetric, EqualityOpportunityMetric
 from fairpp.diagnose import diagnose_postprocessor
 
 from pprep.pipeline import prepare_dataset_from_yaml
@@ -80,9 +80,9 @@ motor = ThresholdRatioModel(num_classes=2, alpha=0.5)
 
 post = FairPostProcessor(
     model=motor,
-    objectives=[CrossEntropyObjective(), DemographicParityKLObjective(fairness_weight = 16.0, ce_weight=0.01)],
-    selector=ZenithSelector([1, 1, 1, 1]),
-    selection_metrics=[AccuracyMetric(), F1ScoreMetric(), DemographicParityMetric(), DEOMetric()],
+    objectives=[CrossEntropyObjective(), DemographicParityObjective(fairness_weight = 4.0, ce_weight=0.01)],
+    selector=ZenithSelector([1, 1, 2, 2]),
+    selection_metrics=[AccuracyMetric(), F1ScoreMetric(), DemographicParityMetric(), EqualityOpportunityMetric()],
     lr=.5e-2,
     epochs=300,
     track_gradients=True

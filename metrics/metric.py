@@ -6,7 +6,7 @@ class Metric(ABC):
     type: str        # "performance" ou "fairness"
 
     @abstractmethod
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None) -> float:
+    def __call__(self, y_true, y_pred, sensitive_attr=None) -> float:
         """
         Calcula o valor da métrica.
 
@@ -18,8 +18,6 @@ class Metric(ABC):
             Predições binárias já thresholdadas.
         sensitive_attr : torch.Tensor | None
             Atributo sensível, quando necessário.
-        scores : torch.Tensor | None
-            Saídas contínuas/probabilidades/logits, quando necessário.
 
         Retorno
         -------
