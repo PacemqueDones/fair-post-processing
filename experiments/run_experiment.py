@@ -1,5 +1,5 @@
 from fairpp.postprocessor import FairPostProcessor
-from fairpp.model import ThresholdMarginModel, ThresholdNormalizedMarginModel, ThresholdRatioModel, ThresholdLogRatioModel
+from fairpp.model import  ThresholdRatioModel, ThresholdRatioSiLUModel, ThresholdRatioDGateModel
 from fairpp.objectives.objectives import CrossEntropyObjective, DemographicParityObjective, EqualityOpportunityObjective, DemographicParityKLObjective, EqualityOpportunityKLObjective
 from fairpp.selectors.selectors import TopsisSelector, ZenithSelector
 from fairpp.metrics.metrics import AccuracyMetric, PrecisionMetric, RecallMetric, F1ScoreMetric, DemographicParityMetric, EqualityOpportunityMetric
@@ -76,7 +76,7 @@ model.fit(X_train, y_train)
 probs_val = model.predict_proba(X_val)
 probs_test = model.predict_proba(X_test)
 
-motor = ThresholdRatioModel(num_classes=2, alpha=0.5)
+motor = ThresholdRatioDGateModel(num_classes=2, alpha=0.5)
 
 post = FairPostProcessor(
     model=motor,

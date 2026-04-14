@@ -33,6 +33,33 @@ class ThresholdRatioModel(nn.Module):
         ratios = probs / (self.thresholds + self.eps)
         return self.alpha * ratios
 
+class ThresholdRatioSiLUModel(nn.Module):
+    def __init__(self, num_classes, alpha=10.0, eps=1e-8):
+        super().__init__()
+        self.thresholds = nn.Parameter(torch.rand(num_classes))
+        self.alpha = alpha
+        self.eps = eps
+
+    def forward(self, probs):
+        ratios = probs / (self.thresholds + self.eps)
+        logits = torch.nn.functional.silu(self.alpha * ratios)
+        return logits
+    
+class ThresholdRatioDGateModel(nn.Module):
+    def __init__(self, num_classes, alpha=10.0, eps=1e-8):
+        super().__init__()
+        self.thresholds = nn.Parameter(torch.rand(num_classes))
+        self.direction = nn.Parameter(torch.ones(num_classes))
+        self.alpha = alpha
+        self.eps = eps
+
+    def forward(self, probs):
+        ratios = probs / (self.thresholds + self.eps)
+        u = self.alpha * ratios
+        gate = self.direction * torch.sigmoid(u)
+        logits = gate * u
+        return logits
+
 class ThresholdLogRatioModel(nn.Module):
     def __init__(self, num_classes, alpha=10.0, eps=1e-8):
         super().__init__()
