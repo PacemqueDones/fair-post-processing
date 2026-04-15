@@ -7,42 +7,24 @@ from fairpp.diagnose import diagnose_postprocessor
 
 from pprep.pipeline import prepare_dataset_from_yaml
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
+from fairpp.engine.nsga2_engine import NSGA2Engine
+
+import torch
 
 import numpy as np
 
 #-----------------------------------------------------------------------------
-def ddp(y_true, y_pred, sensitive_features):
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    s = np.array(sensitive_features)
-    
-    group_0 = (s == 0)
-    group_1 = (s == 1)
-    
-    prob_1_g1 = y_pred[group_1].mean()
-    prob_1_g0 = y_pred[group_0].mean()
-    return float(abs(prob_1_g1 - prob_1_g0))
-
-def deo(y_true, y_pred, sensitive_features):
-    y_true = np.array(y_true).flatten()
-    y_pred = np.array(y_pred)
-    s = np.array(sensitive_features)
-    
-    group_0 = (s == 0)
-    group_1 = (s == 1)
-    
-    recall_g1 = y_pred[(group_1) & (y_true == 1)].mean()
-    recall_g0 = y_pred[(group_0) & (y_true == 1)].mean()
-    return float(abs(recall_g1 - recall_g0)) 
-
 def calculate_metrics(y_true, y_pred, sensitive_features):
-    acc = accuracy_score(y_true, y_pred)
-    rec = recall_score(y_true, y_pred)
-    prec = precision_score(y_true, y_pred, zero_division=0)
-    f1 = f1_score(y_true, y_pred, zero_division=0)
-    diff_dp = ddp(y_true, y_pred, sensitive_features)
-    diff_eo = deo(y_true, y_pred, sensitive_features)
+    y_true = torch.as_tensor(y_true)
+    y_pred = torch.as_tensor(y_pred)
+    sensitive_features = torch.as_tensor(sensitive_features)
+
+    acc = AccuracyMetric()(y_true, y_pred, sensitive_features)
+    rec = RecallMetric()(y_true, y_pred, sensitive_features)
+    prec = PrecisionMetric()(y_true, y_pred, sensitive_features)
+    f1 = F1ScoreMetric()(y_true, y_pred, sensitive_features)
+    diff_dp = DemographicParityMetric()(y_true, y_pred, sensitive_features)
+    diff_eo = EqualityOpportunityMetric()(y_true, y_pred, sensitive_features)
 
     return {
         "acc": float(acc),
@@ -53,7 +35,6 @@ def calculate_metrics(y_true, y_pred, sensitive_features):
         "deo": float(diff_eo),
     }
 #-----------------------------------------------------------------------------
-
 
 data = prepare_dataset_from_yaml("adult")
 
@@ -83,9 +64,14 @@ post = FairPostProcessor(
     objectives=[CrossEntropyObjective(), DemographicParityObjective(fairness_weight = 4.0, ce_weight=0.01)],
     selector=ZenithSelector([1, 1, 2, 2]),
     selection_metrics=[AccuracyMetric(), F1ScoreMetric(), DemographicParityMetric(), EqualityOpportunityMetric()],
+    engine=NSGA2Engine(
+        population_size=50,
+        generations=100,
+        seed=42,
+    ),
     lr=.5e-2,
     epochs=300,
-    track_gradients=True
+    track_gradients=False
 )
 
 post.fit(probs_val, y_val, s_val)
