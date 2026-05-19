@@ -9,6 +9,7 @@ from fairpp.objectives.objectives import (
 )
 from fairpp.selectors.selectors import TopsisSelector, ZenithSelector
 from fairpp.metrics.metrics import (
+    BalancedAccuracyMetric,
     AccuracyMetric,
     PrecisionMetric,
     RecallMetric,
@@ -19,11 +20,12 @@ from fairpp.metrics.metrics import (
 
 from pprep.pipeline import prepare_dataset_from_yaml
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
+from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, balanced_accuracy_score
 
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from datetime import datetime
 
 # -----------------------------------------------------------------------------
 def ddp(y_true, y_pred, sensitive_features):
@@ -57,6 +59,7 @@ def deo(y_true, y_pred, sensitive_features):
 
 def calculate_metrics(y_true, y_pred, sensitive_features):
     acc = accuracy_score(y_true, y_pred)
+    bacc = balanced_accuracy_score(y_true, y_pred)
     rec = recall_score(y_true, y_pred, zero_division=0)
     prec = precision_score(y_true, y_pred, zero_division=0)
     f1 = f1_score(y_true, y_pred, zero_division=0)
@@ -65,6 +68,7 @@ def calculate_metrics(y_true, y_pred, sensitive_features):
 
     return {
         "acc": float(acc),
+        'bacc': float(bacc),
         "rec": float(rec),
         "prec": float(prec),
         "f1": float(f1),
@@ -118,39 +122,59 @@ objectives = [
     [DemographicParityKLObjective(fairness_weight = 8.0, ce_weight=0.01), EqualityOpportunityKLObjective(fairness_weight = 8.0, ce_weight=0.01)],
 ]
 
-selectors = [TopsisSelector([1, 1, 2, 2]), ZenithSelector([1, 1, 2, 2] )]
+selectors = [TopsisSelector([1, 2, 2]), ZenithSelector([1, 2, 2] )]
 
 results = []
 
-output_dir = Path("results_fairpp")
-output_dir.mkdir(exist_ok=True)
+id_output_dir = datetime.today().strftime("%Y-%m-%d_%H-%M")
+output_dir = Path("experiments/results_fairpp") / id_output_dir
+output_dir.mkdir(parents=True, exist_ok=True)
+print(output_dir)
 
 # -----------------------------------------------------------------------------
 for dataset in datasets:
-    for selector in selectors:
-        for objective in objectives:
-            for run in range(20):
+    for run in range(20):
 
-                data = prepare_dataset_from_yaml(dataset)
+        data = prepare_dataset_from_yaml(dataset)  # idealmente com seed variável
 
-                X_train = data['X_train']
-                X_test = data['X_test']
-                X_val = data['X_val']
+        X_train = data["X_train"]
+        X_val = data["X_val"]
+        X_test = data["X_test"]
 
-                y_train = data['y_train'].to_numpy().ravel()
-                y_test = data['y_test'].to_numpy().ravel()
-                y_val = data['y_val'].to_numpy().ravel()
+        y_train = data["y_train"].to_numpy().ravel()
+        y_val = data["y_val"].to_numpy().ravel()
+        y_test = data["y_test"].to_numpy().ravel()
 
-                s_train = data['s_train'].to_numpy().ravel()
-                s_test = data['s_test'].to_numpy().ravel()
-                s_val = data['s_val'].to_numpy().ravel()
+        s_val = data["s_val"].to_numpy().ravel()
+        s_test = data["s_test"].to_numpy().ravel()
 
-                # modelo base
-                base_model = LogisticRegression(max_iter=1000)
-                base_model.fit(X_train, y_train)
+        base_model = LogisticRegression(
+            max_iter=10000,
+            tol=1e-3,
+            random_state=run
+        )
 
-                probs_val = base_model.predict_proba(X_val)
-                probs_test = base_model.predict_proba(X_test)
+        base_model.fit(X_train, y_train)
+
+        probs_val = base_model.predict_proba(X_val)
+        probs_test = base_model.predict_proba(X_test)
+        preds_base = base_model.predict(X_test)
+
+        metrics_base = calculate_metrics(y_test, preds_base, s_test)
+        results.append({
+            "dataset": dataset,
+            "selector": "baseline",
+            "objective": "baseline",
+            "run": run,
+            "solution_type": "baseline",
+            "thresholds": None,
+            **metrics_base
+        })
+
+        for selector in selectors:
+            for objective in objectives:
+                selector_name = get_selector_name(selector)
+                objective_name = get_objective_name(objective)
 
                 motor = ThresholdRatioModel(num_classes=2, alpha=.5)
 
@@ -165,10 +189,9 @@ for dataset in datasets:
                     objectives=current_objectives,
                     selector=selector,
                     selection_metrics=[
-                        AccuracyMetric(),
-                        F1ScoreMetric(),
+                        BalancedAccuracyMetric(),
                         DemographicParityMetric(),
-                        DEOMetric()
+                        EqualityOpportunityMetric()
                     ],
                     lr=.5e-3,
                     epochs=300,
@@ -177,14 +200,9 @@ for dataset in datasets:
 
                 post.fit(probs_val, y_val, s_val)
                 preds_post = post.predict(probs_test)
-                preds_base = base_model.predict(X_test)
-
-                selector_name = get_selector_name(selector)
-                objective_name = get_objective_name(objective)
 
                 metrics_post = calculate_metrics(y_test, preds_post, s_test)
-                metrics_base = calculate_metrics(y_test, preds_base, s_test)
-
+                
                 # registro post-processing
                 results.append({
                     "dataset": dataset,
@@ -194,17 +212,6 @@ for dataset in datasets:
                     "solution_type": "post",
                     "thresholds": str(post.get_thresholds().tolist()),
                     **metrics_post
-                })
-
-                # registro baseline
-                results.append({
-                    "dataset": dataset,
-                    "selector": selector_name,
-                    "objective": objective_name,
-                    "run": run,
-                    "solution_type": "baseline",
-                    "thresholds": None,
-                    **metrics_base
                 })
 
                 print()
@@ -220,7 +227,7 @@ df.to_csv(output_dir / "resultados_detalhados.csv", index=False)
 
 # -----------------------------------------------------------------------------
 # Métricas numéricas
-metric_cols = ["acc", "rec", "prec", "f1", "ddp", "deo"]
+metric_cols = ["acc", "bacc", "rec", "prec", "f1", "ddp", "deo"]
 
 # Média e desvio-padrão
 summary = (
