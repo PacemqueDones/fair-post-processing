@@ -53,13 +53,12 @@ class ZenithSelector:
         X = np.array(points, dtype=float)
         self.weights = np.ones(X.shape[1]) if self.weights is None else np.array(self.weights)
 
-        '''# Rescaling (Min-Max Normalization)
+        # Rescaling (Min-Max Normalization)
         mins = X.min(axis=0)
         maxs = X.max(axis=0)
         denom = maxs - mins
         denom[denom == 0] = 1.0
-        Xn = (X - mins) / denom'''
-        Xn = X
+        Xn = (X - mins) / denom
 
         zenith = []
         for j, direction in enumerate(directions):
@@ -73,4 +72,5 @@ class ZenithSelector:
         zenith = np.array(zenith)
 
         distances = np.linalg.norm((Xn - zenith) * self.weights, axis=1)
+        
         return int(np.argmin(distances))
