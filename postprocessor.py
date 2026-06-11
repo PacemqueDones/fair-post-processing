@@ -9,28 +9,37 @@ class FairPostProcessor:
         self.model = model
         self.objectives = objectives
         self.selector = selector
-        self.selection_metrics = selection_metrics or {}
+        self.selection_metrics = selection_metrics or []
         self.lr = lr
         self.epochs = epochs
 
+        # Otimização multiobjetivo
         self.descent_ = CommonDescent()
-        self.gradient_diagnostics = GradientDiagnostics(self.objectives) if track_gradients else None
+
+        # Diagnóstico de gradientes
         self.track_gradients = track_gradients
+        self.gradient_diagnostics = (
+            GradientDiagnostics(self.objectives)
+            if track_gradients
+            else None
+        )
 
-        self.loss_history_ = []
-        self.metric_history_ = []
-        self.pareto_points_ = []
+        # Histórico completo do treinamento.
+        # Cada posição de history_ deve representar uma época.
+        self.history_ = []
+
+        # Informações da seleção final
         self.pareto_front_ = []
-        self.threshold_history_ = []
-        self.best_thresholds_ = None
+        self.pareto_indices_ = []
+        self.best_index_ = None
 
+        self.best_thresholds_ = None
+        self.best_metrics_ = None
+        self.best_losses_ = None
+
+        # Metadados das métricas usadas na seleção
         self.metric_names_ = None
         self.metric_directions_ = None
-
-        self.cosine_similarity_history_ = []
-        self.grad_norm_history_ = []
-        self.total_loss_history_ = []
-        self.alpha_history_ = []
 
     def _compute_losses(self, logits, y_true, sensitive_attr):
         losses = []
@@ -78,11 +87,6 @@ class FairPostProcessor:
             total_loss.backward()
             optimizer.step()
 
-            self.loss_history_.append(loss_dict)
-
-            if self.track_gradients:
-                self._record_diagnostics(grad_norms, cosine_dict, total_loss, alphas)
-
             with torch.no_grad():
                 logits_eval = self.model(probs)
                 y_pred = torch.argmax(logits_eval, dim=1)
@@ -100,24 +104,47 @@ class FairPostProcessor:
                     metric_dict[metric.name] = value
                     point.append(value)
 
-                self.metric_history_.append(metric_dict)
-                self.pareto_points_.append(point)
-                self.threshold_history_.append(
-                    self.model.thresholds.detach().clone()
-                )
+                epoch_record = {
+                    "epoch": epoch,
+                    "losses": loss_dict,
+                    "metrics": metric_dict,
+                    "point": point,
+                    "thresholds": self.model.thresholds.detach().clone(),
+                }
+
+                if self.track_gradients:
+                    epoch_record["diagnostics"] = {
+                        "grad_norms": grad_norms,
+                        "cosine_similarity": cosine_dict,
+                        "total_loss": float(total_loss.detach().cpu()),
+                        "alphas": (
+                            alphas.detach().cpu().tolist()
+                            if torch.is_tensor(alphas)
+                            else list(alphas)
+                        ),
+                    }
+
+                self.history_.append(epoch_record)
 
         self.metric_names_ = [metric.name for metric in self.selection_metrics]
         self.metric_directions_ = [metric.direction for metric in self.selection_metrics]
 
-        front_idx = pareto_front(self.pareto_points_, self.metric_directions_)
-        self.pareto_front_ = [self.pareto_points_[i] for i in front_idx]
+        pareto_points = [record["point"] for record in self.history_]
+
+        front_idx = pareto_front(pareto_points, self.metric_directions_)
+
+        self.pareto_indices_ = front_idx
+        self.pareto_front_ = [pareto_points[i] for i in front_idx]
 
         local_idx = self.selector.select(self.pareto_front_, self.metric_directions_)
         global_idx = front_idx[local_idx]
 
-        self.best_thresholds_ = self.threshold_history_[global_idx]
-        self.best_metrics_ = self.metric_history_[global_idx]
-        self.best_losses_ = self.loss_history_[global_idx]
+        best_record = self.history_[global_idx]
+
+        self.best_index_ = global_idx
+        self.best_thresholds_ = best_record["thresholds"]
+        self.best_metrics_ = best_record["metrics"]
+        self.best_losses_ = best_record["losses"]
 
         return self
 

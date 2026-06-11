@@ -24,6 +24,7 @@ env/
 # ==========================================
 # Ignora as pastas temporárias com datas dentro de results_fairpp
 experiments/results_fairpp/*/
+experiments/results/*/
 
 # Ignora imagens geradas nos diagnósticos (opcional, mas recomendado)
 experiments/diagnose/*.png
