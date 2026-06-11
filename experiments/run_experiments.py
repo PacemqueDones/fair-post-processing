@@ -1,141 +1,164 @@
 from fairpp.postprocessor import FairPostProcessor
 from fairpp.model import ThresholdRatioModel
+
 from fairpp.objectives.objectives import (
     CrossEntropyObjective,
-    DemographicParityObjective,
-    EqualityOpportunityObjective,
-    DemographicParityKLObjective,
-    EqualityOpportunityKLObjective
+    LaplacianFairnessObjective
 )
-from fairpp.selectors.selectors import TopsisSelector, ZenithSelector
+
+from fairpp.selectors.selectors import TopsisSelector
+
 from fairpp.metrics.metrics import (
     BalancedAccuracyMetric,
-    AccuracyMetric,
-    PrecisionMetric,
-    RecallMetric,
-    F1ScoreMetric,
     DemographicParityMetric,
     EqualityOpportunityMetric
 )
 
+from fairpp.laplacian.builder import MahalanobisLaplacianBuilder
+
 from pprep.pipeline import prepare_dataset_from_yaml
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, balanced_accuracy_score
+
+from sklearn.metrics import (
+    accuracy_score,
+    recall_score,
+    precision_score,
+    f1_score,
+    balanced_accuracy_score
+)
 
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
 
-# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------#
+
+# -----------------------------------------------------------------------------#
 def ddp(y_true, y_pred, sensitive_features):
     y_true = np.array(y_true)
     y_pred = np.array(y_pred)
     s = np.array(sensitive_features)
 
-    group_0 = (s == 0)
-    group_1 = (s == 1)
+    group_0 = s == 0
+    group_1 = s == 1
 
-    prob_1_g1 = y_pred[group_1].mean()
+    if group_0.sum() == 0 or group_1.sum() == 0:
+        return 0.0
+
     prob_1_g0 = y_pred[group_0].mean()
+    prob_1_g1 = y_pred[group_1].mean()
+
     return float(abs(prob_1_g1 - prob_1_g0))
 
+
 def deo(y_true, y_pred, sensitive_features):
-    y_true = np.array(y_true).flatten()
+    y_true = np.array(y_true).ravel()
     y_pred = np.array(y_pred)
     s = np.array(sensitive_features)
 
-    group_0 = (s == 0)
-    group_1 = (s == 1)
+    group_0 = s == 0
+    group_1 = s == 1
 
-    # cuidado se algum grupo não tiver exemplos positivos
-    mask_g1 = (group_1) & (y_true == 1)
-    mask_g0 = (group_0) & (y_true == 1)
+    mask_g0 = group_0 & (y_true == 1)
+    mask_g1 = group_1 & (y_true == 1)
 
-    recall_g1 = y_pred[mask_g1].mean() if mask_g1.sum() > 0 else 0.0
-    recall_g0 = y_pred[mask_g0].mean() if mask_g0.sum() > 0 else 0.0
+    if mask_g0.sum() == 0 or mask_g1.sum() == 0:
+        return 0.0
 
-    return float(abs(recall_g1 - recall_g0))
+    tpr_g0 = y_pred[mask_g0].mean()
+    tpr_g1 = y_pred[mask_g1].mean()
+
+    return float(abs(tpr_g1 - tpr_g0))
+
 
 def calculate_metrics(y_true, y_pred, sensitive_features):
-    acc = accuracy_score(y_true, y_pred)
-    bacc = balanced_accuracy_score(y_true, y_pred)
-    rec = recall_score(y_true, y_pred, zero_division=0)
-    prec = precision_score(y_true, y_pred, zero_division=0)
-    f1 = f1_score(y_true, y_pred, zero_division=0)
-    diff_dp = ddp(y_true, y_pred, sensitive_features)
-    diff_eo = deo(y_true, y_pred, sensitive_features)
-
     return {
-        "acc": float(acc),
-        'bacc': float(bacc),
-        "rec": float(rec),
-        "prec": float(prec),
-        "f1": float(f1),
-        "ddp": float(diff_dp),
-        "deo": float(diff_eo),
+        "acc": float(accuracy_score(y_true, y_pred)),
+        "bacc": float(balanced_accuracy_score(y_true, y_pred)),
+        "rec": float(recall_score(y_true, y_pred, zero_division=0)),
+        "prec": float(precision_score(y_true, y_pred, zero_division=0)),
+        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+        "ddp": float(ddp(y_true, y_pred, sensitive_features)),
+        "deo": float(deo(y_true, y_pred, sensitive_features)),
     }
 
-# -----------------------------------------------------------------------------
-def get_selector_name(selector):
-    return selector.__class__.__name__.replace("Selector", "").lower()
+# -----------------------------------------------------------------------------#
 
-def get_objective_name(objective):
-    """
-    Gera nomes amigáveis para as combinações de objetivos.
-    """
-    if isinstance(objective, list):
-        names = []
-        for obj in objective:
-            if isinstance(obj, DemographicParityObjective):
-                names.append("ddp")
-            elif isinstance(obj, EqualityOpportunityObjective):
-                names.append("deo")
-            elif isinstance(obj, DemographicParityKLObjective):
-                names.append("ddp_kl")
-            elif isinstance(obj, EqualityOpportunityKLObjective):
-                names.append("deo_kl")
-            else:
-                names.append(obj.__class__.__name__.lower())
-        return " + ".join(names)
-
-    if isinstance(objective, DemographicParityObjective):
-        return "ddp"
-    elif isinstance(objective, EqualityOpportunityObjective):
-        return "deo"
-    elif isinstance(objective, DemographicParityKLObjective):
-        return "ddp_kl"
-    elif isinstance(objective, EqualityOpportunityKLObjective):
-        return "deo_kl"
-    else:
-        return objective.__class__.__name__.lower()
-
-# -----------------------------------------------------------------------------
-datasets = ["adult", "bank", "celeba", "compas", "dutch", "heart_failure"]
-
-objectives = [
-    DemographicParityObjective(fairness_weight = 8.0, ce_weight=0.01),
-    EqualityOpportunityObjective(fairness_weight = 8.0, ce_weight=0.01),
-    DemographicParityKLObjective(fairness_weight = 8.0, ce_weight=0.01),
-    EqualityOpportunityKLObjective(fairness_weight = 8.0, ce_weight=0.01),
-    [DemographicParityObjective(fairness_weight = 8.0, ce_weight=0.01), EqualityOpportunityObjective(fairness_weight = 8.0, ce_weight=0.01)],
-    [DemographicParityKLObjective(fairness_weight = 8.0, ce_weight=0.01), EqualityOpportunityKLObjective(fairness_weight = 8.0, ce_weight=0.01)],
+# -----------------------------------------------------------------------------#
+datasets = [
+    "adult",
+    "bank",
+    "celeba",
+    "compas",
+    "dutch",
+    "heart_failure"
 ]
 
-selectors = [TopsisSelector([1, 2, 2]), ZenithSelector([1, 2, 2] )]
+selection_setups = {
+    "select_bacc_ddp": {
+        "selector": TopsisSelector([1, 1]),
+        "metrics": [
+            BalancedAccuracyMetric(),
+            DemographicParityMetric()
+        ]
+    },
+
+    "select_bacc_deo": {
+        "selector": TopsisSelector([1, 1]),
+        "metrics": [
+            BalancedAccuracyMetric(),
+            EqualityOpportunityMetric()
+        ]
+    },
+
+    "select_bacc_ddp_deo": {
+        "selector": TopsisSelector([1, 1, 1]),
+        "metrics": [
+            BalancedAccuracyMetric(),
+            DemographicParityMetric(),
+            EqualityOpportunityMetric()
+        ]
+    }
+}
+
+laplacian_setups = {
+    "lap_with_sensitive": {
+        "use_sensitive": True
+    },
+    "lap_without_sensitive": {
+        "use_sensitive": False
+    }
+}
+# -----------------------------------------------------------------------------#
+
+# -----------------------------------------------------------------------------#
 
 results = []
 
 id_output_dir = datetime.today().strftime("%Y-%m-%d_%H-%M")
 output_dir = Path("experiments/results_fairpp") / id_output_dir
 output_dir.mkdir(parents=True, exist_ok=True)
-print(output_dir)
 
-# -----------------------------------------------------------------------------
+print("Salvando em:", output_dir)
+
+# -----------------------------------------------------------------------------#
+
+# -----------------------------------------------------------------------------#
+
 for dataset in datasets:
-    for run in range(20):
+    print()
+    print("=" * 80)
+    print("DATASET:", dataset)
+    print("=" * 80)
 
-        data = prepare_dataset_from_yaml(dataset)  # idealmente com seed variável
+    for run in range(20):
+        print()
+        print(f"Run {run + 1}/20")
+
+        data = prepare_dataset_from_yaml(dataset, False)
+
+        sensitive_cols = data["sensitive_cols"]
 
         X_train = data["X_train"]
         X_val = data["X_val"]
@@ -161,99 +184,154 @@ for dataset in datasets:
         preds_base = base_model.predict(X_test)
 
         metrics_base = calculate_metrics(y_test, preds_base, s_test)
+
         results.append({
             "dataset": dataset,
-            "selector": "baseline",
-            "objective": "baseline",
             "run": run,
+            "laplacian_setup": "baseline",
+            "uses_sensitive_in_laplacian": "baseline",
+            "selection": "baseline",
+            "objective": "baseline",
             "solution_type": "baseline",
             "thresholds": None,
             **metrics_base
         })
 
-        for selector in selectors:
-            for objective in objectives:
-                selector_name = get_selector_name(selector)
-                objective_name = get_objective_name(objective)
+        for laplacian_name, laplacian_cfg in laplacian_setups.items():
 
-                motor = ThresholdRatioModel(num_classes=2, alpha=.5)
+            use_sensitive_in_laplacian = laplacian_cfg["use_sensitive"]
 
-                current_objectives = (
-                    [CrossEntropyObjective()] + objective
-                    if isinstance(objective, list)
-                    else [CrossEntropyObjective(), objective]
+            print()
+            print("-" * 80)
+            print("Laplaciano:", laplacian_name)
+            print("Usa sensível no Laplaciano?", use_sensitive_in_laplacian)
+            print("-" * 80)
+
+            if use_sensitive_in_laplacian:
+                X_val_lap = X_val.copy()
+            else:
+                X_val_lap = X_val.drop(
+                    columns=sensitive_cols,
+                    errors="ignore"
                 )
+
+            print("Colunas sensíveis:", sensitive_cols)
+            print("X_val shape:", X_val.shape)
+            print("X_val_lap shape:", X_val_lap.shape)
+
+            builder = MahalanobisLaplacianBuilder(
+                theta=1.0,
+                tau_quantile=0.25
+            )
+
+            L_val = builder.build(X_val_lap)
+
+            print("L_val shape:", tuple(L_val.shape))
+            print("probs_val shape:", probs_val.shape)
+
+            if L_val.shape[0] != probs_val.shape[0]:
+                raise ValueError(
+                    f"Erro de dimensão em {dataset}: "
+                    f"L_val={L_val.shape}, probs_val={probs_val.shape}"
+                )
+
+            for selection_name, setup in selection_setups.items():
+                print()
+                print(f"Seleção: {selection_name}")
+
+                motor = ThresholdRatioModel(num_classes=2, alpha=0.5)
 
                 post = FairPostProcessor(
                     model=motor,
-                    objectives=current_objectives,
-                    selector=selector,
-                    selection_metrics=[
-                        BalancedAccuracyMetric(),
-                        DemographicParityMetric(),
-                        EqualityOpportunityMetric()
+                    objectives=[
+                        CrossEntropyObjective(),
+                        LaplacianFairnessObjective(
+                            L=L_val,
+                            fairness_weight=1.0,
+                            ce_weight=0.1,
+                            normalize=True,
+                            symmetrize=True
+                        )
                     ],
-                    lr=.5e-3,
+                    selector=setup["selector"],
+                    selection_metrics=setup["metrics"],
+                    lr=0.5e-3,
                     epochs=300,
                     track_gradients=False
                 )
 
                 post.fit(probs_val, y_val, s_val)
-                preds_post = post.predict(probs_test)
 
+                preds_post = post.predict(probs_test)
                 metrics_post = calculate_metrics(y_test, preds_post, s_test)
-                
-                # registro post-processing
+
                 results.append({
                     "dataset": dataset,
-                    "selector": selector_name,
-                    "objective": objective_name,
                     "run": run,
+                    "laplacian_setup": laplacian_name,
+                    "uses_sensitive_in_laplacian": use_sensitive_in_laplacian,
+                    "selection": selection_name,
+                    "objective": "laplacian_fairness",
                     "solution_type": "post",
                     "thresholds": str(post.get_thresholds().tolist()),
                     **metrics_post
                 })
 
-                print()
-                print(f"Dataset: {dataset} | Selector: {selector_name} | Objective: {objective_name} | Run: {run+1}/20")
                 print("Thresholds:", post.get_thresholds())
-                print("Solução com post-processing:", metrics_post)
-                print("Solução sem post-processing:", metrics_base)
+                print("Baseline:", metrics_base)
+                print("Post:", metrics_post)
 
-# -----------------------------------------------------------------------------
-# Tabela detalhada
+# -----------------------------------------------------------------------------#
+
+# -----------------------------------------------------------------------------#
+
 df = pd.DataFrame(results)
+
 df.to_csv(output_dir / "resultados_detalhados.csv", index=False)
 
-# -----------------------------------------------------------------------------
-# Métricas numéricas
 metric_cols = ["acc", "bacc", "rec", "prec", "f1", "ddp", "deo"]
 
-# Média e desvio-padrão
 summary = (
-    df.groupby(["dataset", "selector", "objective", "solution_type"], as_index=False)[metric_cols]
-      .agg(["mean", "std"])
+    df.groupby(
+        [
+            "dataset",
+            "laplacian_setup",
+            "uses_sensitive_in_laplacian",
+            "selection",
+            "objective",
+            "solution_type"
+        ],
+        as_index=False
+    )[metric_cols]
+    .agg(["mean", "std"])
 )
 
-# Achata as colunas do MultiIndex
 summary.columns = [
     f"{col[0]}_{col[1]}" if col[1] != "" else col[0]
     for col in summary.columns.to_flat_index()
 ]
 
-# Renomeia as colunas principais para nomes limpos
 summary = summary.rename(columns={
     "dataset_": "dataset",
-    "selector_": "selector",
+    "laplacian_setup_": "laplacian_setup",
+    "uses_sensitive_in_laplacian_": "uses_sensitive_in_laplacian",
+    "selection_": "selection",
     "objective_": "objective",
     "solution_type_": "solution_type"
 })
 
 summary.to_csv(output_dir / "resumo_media_desvio.csv", index=False)
 
-# -----------------------------------------------------------------------------
-# Tabela formatada com média ± desvio
-formatted_df = summary[["dataset", "selector", "objective", "solution_type"]].copy()
+formatted_df = summary[
+    [
+        "dataset",
+        "laplacian_setup",
+        "uses_sensitive_in_laplacian",
+        "selection",
+        "objective",
+        "solution_type"
+    ]
+].copy()
 
 for metric in metric_cols:
     formatted_df[metric] = (
@@ -264,31 +342,8 @@ for metric in metric_cols:
 
 formatted_df.to_csv(output_dir / "resumo_formatado.csv", index=False)
 
-# -----------------------------------------------------------------------------
-# Coluna com nome completo do experimento
-formatted_df["experiment"] = formatted_df["selector"] + " + " + formatted_df["objective"]
-
-formatted_df[
-    ["dataset", "experiment", "solution_type", "acc", "rec", "prec", "f1", "ddp", "deo"]
-].to_csv(output_dir / "resumo_experimentos.csv", index=False)
-
-# -----------------------------------------------------------------------------
-# Pivot mais seguro
-pivot_df = formatted_df.pivot(
-    index=["dataset", "selector", "objective"],
-    columns="solution_type",
-    values=metric_cols
-)
-
-# Opcional: achatar colunas do pivot também
-pivot_df.columns = [f"{metric}_{sol}" for metric, sol in pivot_df.columns]
-pivot_df = pivot_df.reset_index()
-
-pivot_df.to_csv(output_dir / "resumo_pivotado.csv", index=False)
-
-print("\nArquivos salvos em:", output_dir.resolve())
+print()
+print("Arquivos salvos em:", output_dir.resolve())
 print("- resultados_detalhados.csv")
 print("- resumo_media_desvio.csv")
 print("- resumo_formatado.csv")
-print("- resumo_experimentos.csv")
-print("- resumo_pivotado.csv")

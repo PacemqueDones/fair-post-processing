@@ -1,0 +1,40 @@
+# ==========================================
+# 1. Caches do Python e Arquivos Compilados
+# ==========================================
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ==========================================
+# 2. Configurações de IDEs (Locais)
+# ==========================================
+.vscode/
+.idea/
+
+# ==========================================
+# 3. Ambientes Virtuais (Caso use algum)
+# ==========================================
+.venv/
+venv/
+env/
+
+# ==========================================
+# 4. Dados, Resultados e Gráficos Gerados
+# ==========================================
+# Ignora as pastas temporárias com datas dentro de results_fairpp
+experiments/results_fairpp/*/
+
+# Ignora imagens geradas nos diagnósticos (opcional, mas recomendado)
+experiments/diagnose/*.png
+experiments/fronteira-pareto.png
+
+# Se quiser ignorar TODOS os arquivos .csv gerados automaticamente
+*.csv
+
+# ==========================================
+# 5. Notebooks (Opcional)
+# ==========================================
+# Se os arquivos .ipynb salvarem checkpoints pesados
+.ipynb_checkpoints/
+.ipynb

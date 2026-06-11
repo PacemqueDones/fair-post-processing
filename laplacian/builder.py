@@ -11,14 +11,12 @@ class MahalanobisLaplacianBuilder:
         laplacian_type="unnormalized",
         eps=1e-8,
         dtype=torch.float32,
-        device="cpu",
     ):
         self.theta = theta
         self.tau_quantile = tau_quantile
         self.laplacian_type = laplacian_type
         self.eps = eps
         self.dtype = dtype
-        self.device = device
 
     def _to_numpy(self, X):
         if isinstance(X, torch.Tensor):
@@ -101,8 +99,7 @@ class MahalanobisLaplacianBuilder:
 
         L_torch = torch.tensor(
             L,
-            dtype=self.dtype,
-            device=self.device
+            dtype=self.dtype
         )
 
         if return_artifacts:

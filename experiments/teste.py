@@ -37,7 +37,6 @@ from fairpp.metrics.metrics import (
     F1ScoreMetric,
     DemographicParityMetric,
     EqualityOpportunityMetric,
-    GeneralizedEntropyMetric,
 )
 
 from fairpp.selectors.selectors import (
@@ -215,14 +214,14 @@ post = FairPostProcessor(
     objectives=[
         CrossEntropyObjective(),
         EqualityOpportunityObjective(
-            fairness_weight=10.0,
-            ce_weight=0.5,
+            fairness_weight=8.0,
+            ce_weight=2,
         ),
     ],
     selector=TopsisSelector([1, 1]),
     selection_metrics=[
         BalancedAccuracyMetric(),
-        GeneralizedEntropyMetric(alpha=2.0),
+        EqualityOpportunityMetric(),
     ],
     lr=0.5e-2,
     epochs=300,

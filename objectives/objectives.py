@@ -117,3 +117,55 @@ class EqualityOpportunityKLObjective(Objective):
         ce = F.cross_entropy(logits, y_true)
 
         return self.fairness_weight * fairness + self.ce_weight * ce
+    
+class LaplacianFairnessObjective(Objective):
+    name = "laplacian_fairness"
+
+    def __init__(
+        self,
+        L,
+        fairness_weight=1.0,
+        ce_weight=0.1,
+        normalize=True,
+        symmetrize=False,
+    ):
+        self.L = L.float()
+        self.fairness_weight = fairness_weight
+        self.ce_weight = ce_weight
+        self.normalize = normalize
+        self.symmetrize = symmetrize
+
+    def __call__(self, logits, y_true, sensitive_attr):
+        """
+        Calcula a perda laplaciana:
+
+            tr(F^T L F)
+
+        onde F pode ser:
+            - logits diretamente;
+        """
+
+        F_scores = logits.float()
+
+        if F_scores.ndim == 1:
+            F_scores = F_scores.view(-1, 1)
+
+        L = self.L.to(F_scores.device)
+
+        if self.symmetrize:
+            L = 0.5 * (L + L.T)
+
+        if L.shape[0] != F_scores.shape[0]:
+            raise ValueError(
+                f"L tem shape {L.shape}, mas logits tem shape {F_scores.shape}. "
+                "O Laplaciano precisa ser gerado sobre o mesmo conjunto usado no fit."
+            )
+
+        fairness = torch.trace(F_scores.T @ L @ F_scores)
+
+        if self.normalize:
+            fairness = fairness / F_scores.shape[0]
+
+        ce = F.cross_entropy(logits, y_true)
+
+        return self.fairness_weight * fairness + self.ce_weight * ce

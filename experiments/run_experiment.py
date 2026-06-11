@@ -5,12 +5,15 @@ from fairpp.model import  (
     ThresholdRatioDGateModel
 )
 
+from fairpp.laplacian.builder import MahalanobisLaplacianBuilder
+
 from fairpp.objectives.objectives import (
     CrossEntropyObjective,
     DemographicParityObjective,
     EqualityOpportunityObjective,
     DemographicParityKLObjective,
-    EqualityOpportunityKLObjective
+    EqualityOpportunityKLObjective,
+    LaplacianFairnessObjective
 )
 
 from fairpp.metrics.metrics import (
@@ -84,32 +87,52 @@ def calculate_metrics(y_true, y_pred, sensitive_features):
 #-----------------------------------------------------------------------------
 
 
-data = prepare_dataset_from_yaml("adult")
+data = prepare_dataset_from_yaml("adult", False)
 
-X_train = data['X_train']
-X_test = data['X_test']
-X_val = data['X_val']
+target_col = data["target_col"]
+sensitive_cols = data["sensitive_cols"]
 
-y_train = data['y_train'].to_numpy().ravel()
-y_test = data['y_test'].to_numpy().ravel()
-y_val = data['y_val'].to_numpy().ravel()
+X_train = data["X_train"]
+X_val = data["X_val"]
+X_test = data["X_test"]
 
-s_train = data['s_train'].to_numpy().ravel()
-s_test = data['s_test'].to_numpy().ravel()
-s_val = data['s_val'].to_numpy().ravel()
+y_train = data["y_train"].to_numpy().ravel()
+y_val = data["y_val"].to_numpy().ravel()
+y_test = data["y_test"].to_numpy().ravel()
+
+s_train = data["s_train"].to_numpy().ravel()
+s_val = data["s_val"].to_numpy().ravel()
+s_test = data["s_test"].to_numpy().ravel()
 
 
+# Modelo base: COM atributo sensível
 model = LogisticRegression(max_iter=1000)
 model.fit(X_train, y_train)
 
 probs_val = model.predict_proba(X_val)
 probs_test = model.predict_proba(X_test)
 
+
+# Laplaciano: COM ou SEM atributo sensível
+USE_SENSITIVE_IN_LAPLACIAN = False
+
+if USE_SENSITIVE_IN_LAPLACIAN:
+    X_val_lap = X_val.copy()
+else:
+    X_val_lap = X_val.drop(columns=sensitive_cols, errors="ignore")
+
+builder = MahalanobisLaplacianBuilder(
+    theta=1.0,
+    tau_quantile=0.25
+)
+
+L_val = builder.build(X_val_lap)
+
 motor = ThresholdRatioDGateModel(num_classes=2, alpha=0.5)
 
 post = FairPostProcessor(
     model=motor,
-    objectives=[CrossEntropyObjective(), EqualityOpportunityObjective(fairness_weight = 8.0, ce_weight=0.5)],
+    objectives=[CrossEntropyObjective(), LaplacianFairnessObjective(L=L_val) ],
     selector=TopsisSelector([1, 1]),
     selection_metrics=[BalancedAccuracyMetric(), EqualityOpportunityMetric()],
     lr=.5e-2,
@@ -127,16 +150,20 @@ print()
 print("Soloção com post-processing: ", calculate_metrics(y_test, preds, s_test))
 print("Soloção sem post-processing: ", calculate_metrics(y_test, model.predict(X_test), s_test))
 print()
+
 pareto_front_unico = np.unique(post.pareto_front_, axis=0)
+print("Fronte Pareto Único")
+
 for point in pareto_front_unico:
     print(point)
-print()
-for point in post.pareto_points_:
+    
+print("\nPontos Genesis")
+for point in np.unique(post.pareto_points_, axis = 0):
     print(point)
 
 import matplotlib.pyplot as plt
 pareto_front_unique = np.unique(post.pareto_front_, axis=0)
-x = 1 - pareto_front_unique[:, 0]
+x = pareto_front_unique[:, 0]
 y = pareto_front_unique[:, 1]
 
 # Criando o gráfico
@@ -145,7 +172,7 @@ plt.scatter(x, y, color='royalblue', linestyle='--', marker='o', label='Fronteir
 
 # Estilização básica
 plt.title('Fronteira de Pareto', fontsize=14, fontweight='bold', pad=15)
-plt.xlabel('Métrica Acurácia)', fontsize=11)
+plt.xlabel('Métrica Acurácia', fontsize=11)
 plt.ylabel('Métrica Fairness', fontsize=11)
 plt.grid(True, linestyle=':', alpha=0.6)
 plt.legend()
