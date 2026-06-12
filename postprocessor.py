@@ -1,5 +1,5 @@
 import torch
-from .pareto import pareto_front
+from .selection.pareto import pareto_front
 from .optimization.multiobjective import CommonDescent
 from .gradients.gradients import GradientDiagnostics
 
@@ -99,6 +99,7 @@ class FairPostProcessor:
                         y_true=y_true,
                         y_pred=y_pred,
                         sensitive_attr=sensitive_attr,
+                        scores=logits_eval,
                     )
 
                     metric_dict[metric.name] = value

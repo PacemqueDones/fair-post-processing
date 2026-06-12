@@ -2,8 +2,10 @@ import numpy as np
 import torch
 from scipy.spatial.distance import pdist, squareform
 
+from .geometry import FairGeometry
 
-class MahalanobisLaplacianBuilder:
+
+class MahalanobisGeometryBuilder:
     def __init__(
         self,
         theta=1.0,
@@ -27,7 +29,7 @@ class MahalanobisLaplacianBuilder:
 
         return np.asarray(X)
 
-    def _build_W(self, X):
+    def _build_distance(self, X):
         X = self._to_numpy(X).astype(np.float64)
 
         cov = np.cov(X, rowvar=False)
@@ -35,9 +37,23 @@ class MahalanobisLaplacianBuilder:
 
         inv_cov = np.linalg.inv(cov)
 
-        dist_vector = pdist(X, metric="mahalanobis", VI=inv_cov)
+        dist_vector = pdist(
+            X,
+            metric="mahalanobis",
+            VI=inv_cov
+        )
 
-        tau = np.quantile(dist_vector[dist_vector > 0], self.tau_quantile)
+        D_X = squareform(dist_vector)
+
+        return D_X, dist_vector
+
+    def _build_W(self, dist_vector):
+        positive_distances = dist_vector[dist_vector > 0]
+
+        tau = np.quantile(
+            positive_distances,
+            self.tau_quantile
+        )
 
         W_vector = np.exp(-self.theta * dist_vector**2)
         W_vector[dist_vector > tau] = 0.0
@@ -49,7 +65,7 @@ class MahalanobisLaplacianBuilder:
 
         np.fill_diagonal(W, 0.0)
 
-        return W
+        return W, tau
 
     def _unnormalized_laplacian(self, W):
         degree = W.sum(axis=1)
@@ -75,38 +91,53 @@ class MahalanobisLaplacianBuilder:
         L = -W_tilde.copy()
 
         # L = I - D_tilde^{-1} W_tilde
-        # Então fora da diagonal: - W_tilde_ij / degree_tilde_i
         L = L / (degree_tilde[:, None] + self.eps)
 
         np.fill_diagonal(L, 1.0)
 
         return L
 
-    def build(self, X, return_artifacts=False):
-        W = self._build_W(X)
-
+    def _build_laplacian(self, W):
         if self.laplacian_type == "unnormalized":
-            L = self._unnormalized_laplacian(W)
+            return self._unnormalized_laplacian(W)
 
-        elif self.laplacian_type == "normalized_random_walk":
-            L = self._normalized_random_walk_laplacian(W)
+        if self.laplacian_type == "normalized_random_walk":
+            return self._normalized_random_walk_laplacian(W)
 
-        else:
-            raise ValueError(
-                "laplacian_type deve ser 'unnormalized' "
-                "ou 'normalized_random_walk'."
-            )
+        raise ValueError(
+            "laplacian_type deve ser 'unnormalized' "
+            "ou 'normalized_random_walk'."
+        )
+
+    def build(self, X):
+        D_X, dist_vector = self._build_distance(X)
+
+        W, tau = self._build_W(dist_vector)
+
+        L = self._build_laplacian(W)
+
+        D_X_torch = torch.tensor(
+            D_X,
+            dtype=self.dtype
+        )
+
+        W_torch = torch.tensor(
+            W,
+            dtype=self.dtype
+        )
 
         L_torch = torch.tensor(
             L,
             dtype=self.dtype
         )
 
-        if return_artifacts:
-            return {
-                "W": W,
-                "L": L_torch,
-                "laplacian_type": self.laplacian_type,
-            }
-
-        return L_torch
+        return FairGeometry(
+            D_X=D_X_torch,
+            W=W_torch,
+            L=L_torch,
+            laplacian_type=self.laplacian_type,
+            distance_name="mahalanobis",
+            theta=self.theta,
+            tau_quantile=self.tau_quantile,
+            tau=float(tau),
+        )

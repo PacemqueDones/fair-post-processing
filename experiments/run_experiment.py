@@ -1,11 +1,11 @@
 
-from fairpp.model import  (
-    ThresholdRatioModel, 
-    ThresholdRatioSiLUModel, 
+from fairpp.models import (
+    ThresholdRatioModel,
+    ThresholdRatioSiLUModel,
     ThresholdRatioDGateModel
 )
 
-from fairpp.laplacian.builder import MahalanobisLaplacianBuilder
+from fairpp.geometry import MahalanobisGeometryBuilder
 
 from fairpp.objectives.objectives import (
     CrossEntropyObjective,
@@ -15,7 +15,6 @@ from fairpp.objectives.objectives import (
     EqualityOpportunityKLObjective,
     LaplacianFairnessObjective
 )
-
 from fairpp.metrics.metrics import (
     BalancedAccuracyMetric,
     AccuracyMetric,
@@ -23,16 +22,17 @@ from fairpp.metrics.metrics import (
     RecallMetric,
     F1ScoreMetric,
     DemographicParityMetric,
-    EqualityOpportunityMetric
+    EqualityOpportunityMetric,
+    IndividualFairnessViolationMeanMetric,
 )
 
-from fairpp.selectors.selectors import (
-    TopsisSelector, 
+from fairpp.selection.selectors import (
+    TopsisSelector,
     ZenithSelector
 )
 
-from fairpp.diagnose import diagnose_postprocessor
-
+from fairpp.diagnostics import diagnose_postprocessor
+from fairpp.evaluation import calculate_metrics, resumir_resultados
 from fairpp.postprocessor import FairPostProcessor
 
 from pprep.pipeline import prepare_dataset_from_yaml
@@ -40,7 +40,6 @@ from pprep.pipeline import prepare_dataset_from_yaml
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, StratifiedKFold
 
-import torch
 import numpy as np
 from datetime import datetime
 from pathlib import Path
@@ -62,46 +61,15 @@ def resumir_resultados(lista_resultados):
 
     return resumo
 
-def calculate_metrics(y_true, y_pred, sensitive_features):
-    results = {}
-
-    metrics = [
-        AccuracyMetric(),
-        BalancedAccuracyMetric(),
-        RecallMetric(),
-        PrecisionMetric(),
-        F1ScoreMetric(),
-        DemographicParityMetric(),
-        EqualityOpportunityMetric(),
-    ]
-
-    # garante tensores
-    if not torch.is_tensor(y_true):
-        y_true = torch.tensor(y_true)
-
-    if not torch.is_tensor(y_pred):
-        y_pred = torch.tensor(y_pred)
-
-    if not torch.is_tensor(sensitive_features):
-        sensitive_features = torch.tensor(sensitive_features)
-
-    # garante vetor 1D
-    y_true = y_true.view(-1)
-    y_pred = y_pred.view(-1)
-    sensitive_features = sensitive_features.view(-1)
-
-    for metric in metrics:
-        results[metric.name] = float(
-            round(
-                metric(
-                    y_true=y_true,
-                    y_pred=y_pred,
-                    sensitive_attr=sensitive_features
-                )
-            ,4)
-        )
-
-    return results
+metrics = [
+    AccuracyMetric(),
+    BalancedAccuracyMetric(),
+    RecallMetric(),
+    PrecisionMetric(),
+    F1ScoreMetric(),
+    DemographicParityMetric(),
+    EqualityOpportunityMetric(),
+]
 
 #-----------------------------------------------------------------------------
 # Configurações do experimento
@@ -116,7 +84,7 @@ K = 5
 USE_SENSITIVE_IN_MODEL = True
 USE_SENSITIVE_IN_LAPLACIAN = False
 
-experiment_date = datetime.now().strftime("%d/%m/%Y-%H-%M")
+experiment_date = datetime.now().strftime("%d-%m-%Y_%H-%M")
 experiment_dir = Path("experiments") / "results" / "one_datasets" / DATASET / experiment_date
 
 #-----------------------------------------------------------------------------
@@ -217,12 +185,12 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     else:
         X_val_lap = X_val.drop(columns=sensitive_cols, errors="ignore")
 
-    builder = MahalanobisLaplacianBuilder(
+    builder = MahalanobisGeometryBuilder(
         theta=1.0,
         tau_quantile=0.25
     )
 
-    L_val = builder.build(X_val_lap)
+    geometry_val = builder.build(X_val_lap)
 
     #-------------------------------------------------------------------------
     # Pós-processador
@@ -234,12 +202,12 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
         model=motor,
         objectives=[
             CrossEntropyObjective(),
-            LaplacianFairnessObjective(L=L_val)
+            LaplacianFairnessObjective(L=geometry_val.L)
         ],
         selector=TopsisSelector([1, 1]),
         selection_metrics=[
             BalancedAccuracyMetric(),
-            EqualityOpportunityMetric()
+            IndividualFairnessViolationMeanMetric(D_X=geometry_val.D_X)
         ],
         lr=.5e-2,
         epochs=300,
@@ -263,8 +231,19 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     # Avaliação no teste externo
     #-------------------------------------------------------------------------
 
-    metricas_post = calculate_metrics(y_test, preds_post, s_test)
-    metricas_base = calculate_metrics(y_test, preds_base, s_test)
+    metricas_post = calculate_metrics(
+        y_true=y_test,
+        y_pred=preds_post,
+        sensitive_features=s_test,
+        metrics=metrics
+    )
+
+    metricas_base = calculate_metrics(
+        y_true=y_test,
+        y_pred=preds_base,
+        sensitive_features=s_test,
+        metrics=metrics
+    )
 
     resultados_post.append(metricas_post)
     resultados_base.append(metricas_base)
