@@ -28,13 +28,22 @@ def to_jsonable(obj):
         return float(obj)
 
     if isinstance(obj, dict):
-        return {str(k): to_jsonable(v) for k, v in obj.items()}
+        return {
+            str(k): to_jsonable(v)
+            for k, v in obj.items()
+        }
 
     if isinstance(obj, list):
-        return [to_jsonable(v) for v in obj]
+        return [
+            to_jsonable(v)
+            for v in obj
+        ]
 
     if isinstance(obj, tuple):
-        return [to_jsonable(v) for v in obj]
+        return [
+            to_jsonable(v)
+            for v in obj
+        ]
 
     return obj
 
@@ -50,6 +59,7 @@ def save_json(path, data):
             indent=4
         )
 
+
 def save_matrix_csv(path, matrix):
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -61,8 +71,16 @@ def save_matrix_csv(path, matrix):
         f.write("epoch," + ",".join(columns) + "\n")
 
         for idx, row in zip(indices, data):
-            values = [str(idx)] + [str(value) for value in row]
+            values = [str(idx)]
+
+            for value in row:
+                if value is None:
+                    values.append("")
+                else:
+                    values.append(str(value))
+
             f.write(",".join(values) + "\n")
+
 
 def matrix_json(columns, indices, data):
     return {
@@ -73,7 +91,7 @@ def matrix_json(columns, indices, data):
 
 
 # =========================================================
-# Extração matricial do histórico
+# Matrizes básicas do histórico
 # =========================================================
 
 def history_points_matrix(post):
@@ -83,13 +101,11 @@ def history_points_matrix(post):
     data = []
 
     for record in post.history_:
-        point = record.get("point", [])
-
         indices.append(int(record.get("epoch")))
 
         data.append([
             float(value)
-            for value in point
+            for value in record.get("point", [])
         ])
 
     return matrix_json(columns, indices, data)
@@ -145,6 +161,9 @@ def history_thresholds_matrix(post):
 
     first_thresholds = post.history_[0].get("thresholds")
 
+    if first_thresholds is None:
+        return matrix_json([], [], [])
+
     if torch.is_tensor(first_thresholds):
         first_thresholds = first_thresholds.detach().cpu().tolist()
 
@@ -194,7 +213,7 @@ def history_diagnostics(post):
 
 
 # =========================================================
-# Pareto em formato matricial
+# Pareto
 # =========================================================
 
 def normalize_indices(indices):
@@ -212,6 +231,7 @@ def normalize_indices(indices):
 
 def pareto_points_with_epochs_matrix(post):
     columns = post.metric_names_ or []
+
     pareto_indices = normalize_indices(
         getattr(post, "pareto_indices_", None)
     )
@@ -224,15 +244,13 @@ def pareto_points_with_epochs_matrix(post):
 
     for epoch_idx in pareto_indices:
         epoch_idx = int(epoch_idx)
-
         record = post.history_[epoch_idx]
-        point = record.get("point", [])
 
         indices.append(int(record.get("epoch")))
 
         data.append([
             float(value)
-            for value in point
+            for value in record.get("point", [])
         ])
 
     return matrix_json(columns, indices, data)
@@ -262,6 +280,7 @@ def selected_solution(post):
     record = post.history_[best_index]
 
     thresholds = record.get("thresholds")
+
     if torch.is_tensor(thresholds):
         thresholds = thresholds.detach().cpu().tolist()
 
@@ -276,181 +295,160 @@ def selected_solution(post):
 
 
 # =========================================================
-# Similaridade cosseno
+# Diagnóstico de gradientes
 # =========================================================
 
-def get_objective_names(post):
-    if len(post.history_) == 0:
-        return []
+def gradient_diagnostics_matrix(post):
+    diagnostics = history_diagnostics(post)
 
-    return list(post.history_[0].get("losses", {}).keys())
-
-
-def parse_cosine_key(key, objective_names):
-    if isinstance(key, tuple) and len(key) == 2:
-        return key[0], key[1]
-
-    key = str(key)
-
-    separators = [
-        " vs ",
-        "_vs_",
-        "__",
-        "--",
-        " - ",
-        ",",
-        "|",
-    ]
-
-    for sep in separators:
-        if sep in key:
-            left, right = key.split(sep, 1)
-            return left.strip(), right.strip()
-
-    if len(objective_names) == 2:
-        return objective_names[0], objective_names[1]
-
-    return None
-
-
-def cosine_similarity_by_epoch_matrix(post):
-    objective_names = get_objective_names(post)
-
-    if len(objective_names) < 2:
+    if len(diagnostics) == 0:
         return matrix_json([], [], [])
 
-    columns = []
-    pair_names = []
+    columns = [
+        "loss_raw_cross_entropy",
+        "loss_raw_laplacian_fairness",
 
-    for i in range(len(objective_names)):
-        for j in range(i + 1, len(objective_names)):
-            pair_name = f"{objective_names[i]}__{objective_names[j]}"
-            columns.append(pair_name)
-            pair_names.append((objective_names[i], objective_names[j]))
+        "loss_norm_cross_entropy",
+        "loss_norm_laplacian_fairness",
+
+        "grad_norm_raw_cross_entropy",
+        "grad_norm_raw_laplacian_fairness",
+
+        "grad_norm_norm_cross_entropy",
+        "grad_norm_norm_laplacian_fairness",
+
+        "cosine_raw",
+        "cosine_normalized",
+
+        "alpha_cross_entropy",
+        "alpha_laplacian_fairness",
+
+        "dot_raw_cross_entropy",
+        "dot_raw_laplacian_fairness",
+
+        "dot_norm_cross_entropy",
+        "dot_norm_laplacian_fairness",
+
+        "descent_norm",
+        "total_loss",
+    ]
 
     indices = []
     data = []
 
-    for record in post.history_:
-        diagnostics = record.get("diagnostics")
+    pair_name = "cross_entropy__laplacian_fairness"
 
-        if diagnostics is None:
-            continue
+    for row in diagnostics:
+        losses_raw = row.get("losses_raw", {})
+        losses_normalized = row.get("losses_normalized", {})
 
-        cosine_dict = diagnostics.get("cosine_similarity", {})
+        grad_norms_raw = row.get("grad_norms_raw", {})
+        grad_norms_normalized = row.get("grad_norms_normalized", {})
 
-        if cosine_dict is None or len(cosine_dict) == 0:
-            continue
+        cosine_raw = row.get("cosine_raw", {})
+        cosine_normalized = row.get("cosine_normalized", {})
 
-        row = []
+        descent_dot_raw = row.get("descent_dot_raw", {})
+        descent_dot_normalized = row.get("descent_dot_normalized", {})
 
-        for obj_i, obj_j in pair_names:
-            value_found = None
+        alphas = row.get("alphas", [])
 
-            for key, value in cosine_dict.items():
-                parsed = parse_cosine_key(key, objective_names)
+        indices.append(int(row["epoch"]))
 
-                if parsed is None:
-                    continue
+        data.append([
+            losses_raw.get("cross_entropy"),
+            losses_raw.get("laplacian_fairness"),
 
-                left, right = parsed
+            losses_normalized.get("cross_entropy"),
+            losses_normalized.get("laplacian_fairness"),
 
-                same_order = left == obj_i and right == obj_j
-                reverse_order = left == obj_j and right == obj_i
+            grad_norms_raw.get("cross_entropy"),
+            grad_norms_raw.get("laplacian_fairness"),
 
-                if same_order or reverse_order:
-                    value_found = float(value)
-                    break
+            grad_norms_normalized.get("cross_entropy"),
+            grad_norms_normalized.get("laplacian_fairness"),
 
-            row.append(value_found)
+            cosine_raw.get(pair_name),
+            cosine_normalized.get(pair_name),
 
-        indices.append(int(record.get("epoch")))
-        data.append(row)
+            alphas[0] if len(alphas) > 0 else None,
+            alphas[1] if len(alphas) > 1 else None,
+
+            descent_dot_raw.get("cross_entropy"),
+            descent_dot_raw.get("laplacian_fairness"),
+
+            descent_dot_normalized.get("cross_entropy"),
+            descent_dot_normalized.get("laplacian_fairness"),
+
+            row.get("descent_norm"),
+            row.get("total_loss"),
+        ])
 
     return matrix_json(columns, indices, data)
 
 
-def cosine_similarity_matrix(post):
-    objective_names = get_objective_names(post)
-    n = len(objective_names)
+# =========================================================
+# Utilidades para gráficos
+# =========================================================
 
-    if n == 0:
-        return matrix_json([], [], [])
+def transform_metric_for_plot(values, direction):
+    values = np.asarray(values, dtype=float)
 
-    matrix_sum = np.eye(n, dtype=float)
-    matrix_count = np.eye(n, dtype=float)
+    if direction == "max":
+        return values
 
-    name_to_idx = {
-        name: i
-        for i, name in enumerate(objective_names)
-    }
+    if direction == "min":
+        return 1.0 - values
 
-    for record in post.history_:
-        diagnostics = record.get("diagnostics")
+    raise ValueError(f"Direção desconhecida: {direction}")
 
-        if diagnostics is None:
-            continue
 
-        cosine_dict = diagnostics.get("cosine_similarity", {})
+def transformed_metric_name(name, direction):
+    if direction == "max":
+        return name
 
-        if cosine_dict is None:
-            continue
+    if direction == "min":
+        return f"1 - {name}"
 
-        for key, value in cosine_dict.items():
-            parsed = parse_cosine_key(key, objective_names)
+    raise ValueError(f"Direção desconhecida: {direction}")
 
-            if parsed is None:
-                continue
 
-            obj_i, obj_j = parsed
+def get_matrix_column(matrix, column_name):
+    columns = matrix["columns"]
 
-            if obj_i not in name_to_idx or obj_j not in name_to_idx:
-                continue
+    if column_name not in columns:
+        return None
 
-            i = name_to_idx[obj_i]
-            j = name_to_idx[obj_j]
+    j = columns.index(column_name)
+    data = np.asarray(matrix["data"], dtype=float)
 
-            matrix_sum[i, j] += float(value)
-            matrix_sum[j, i] += float(value)
+    if data.size == 0:
+        return None
 
-            matrix_count[i, j] += 1
-            matrix_count[j, i] += 1
-
-    matrix = matrix_sum / np.maximum(matrix_count, 1)
-
-    return matrix_json(
-        columns=objective_names,
-        indices=objective_names,
-        data=matrix.tolist()
-    )
+    return data[:, j]
 
 
 # =========================================================
-# Plots
+# Plots básicos
 # =========================================================
 
 def plot_losses(post, plots_dir):
-    if len(post.history_) == 0:
+    matrix = history_losses_matrix(post)
+
+    columns = matrix["columns"]
+    indices = matrix["indices"]
+
+    if len(columns) == 0 or len(indices) == 0:
         return
 
-    first_losses = post.history_[0].get("losses", {})
-
-    if len(first_losses) == 0:
-        return
-
-    epochs = [record["epoch"] for record in post.history_]
+    data = np.asarray(matrix["data"], dtype=float)
 
     plt.figure()
 
-    for loss_name in first_losses.keys():
-        values = [
-            record["losses"].get(loss_name)
-            for record in post.history_
-        ]
+    for j, name in enumerate(columns):
+        plt.plot(indices, data[:, j], label=name)
 
-        plt.plot(epochs, values, label=loss_name)
-
-    plt.title("Losses por época")
+    plt.title("Losses brutas por época")
     plt.xlabel("Época")
     plt.ylabel("Loss")
     plt.legend()
@@ -461,25 +459,20 @@ def plot_losses(post, plots_dir):
 
 
 def plot_metrics(post, plots_dir):
-    if len(post.history_) == 0:
+    matrix = history_metrics_matrix(post)
+
+    columns = matrix["columns"]
+    indices = matrix["indices"]
+
+    if len(columns) == 0 or len(indices) == 0:
         return
 
-    first_metrics = post.history_[0].get("metrics", {})
-
-    if len(first_metrics) == 0:
-        return
-
-    epochs = [record["epoch"] for record in post.history_]
+    data = np.asarray(matrix["data"], dtype=float)
 
     plt.figure()
 
-    for metric_name in first_metrics.keys():
-        values = [
-            record["metrics"].get(metric_name)
-            for record in post.history_
-        ]
-
-        plt.plot(epochs, values, label=metric_name)
+    for j, name in enumerate(columns):
+        plt.plot(indices, data[:, j], label=name)
 
     plt.title("Métricas por época")
     plt.xlabel("Época")
@@ -492,35 +485,20 @@ def plot_metrics(post, plots_dir):
 
 
 def plot_thresholds(post, plots_dir):
-    if len(post.history_) == 0:
+    matrix = history_thresholds_matrix(post)
+
+    columns = matrix["columns"]
+    indices = matrix["indices"]
+
+    if len(columns) == 0 or len(indices) == 0:
         return
 
-    thresholds = []
-
-    for record in post.history_:
-        thr = record.get("thresholds")
-
-        if thr is None:
-            return
-
-        if torch.is_tensor(thr):
-            thr = thr.detach().cpu().numpy()
-        else:
-            thr = np.asarray(thr)
-
-        thresholds.append(thr)
-
-    thresholds = np.asarray(thresholds, dtype=float)
-
-    if thresholds.ndim != 2:
-        return
-
-    epochs = [record["epoch"] for record in post.history_]
+    data = np.asarray(matrix["data"], dtype=float)
 
     plt.figure()
 
-    for j in range(thresholds.shape[1]):
-        plt.plot(epochs, thresholds[:, j], label=f"threshold_{j}")
+    for j, name in enumerate(columns):
+        plt.plot(indices, data[:, j], label=name)
 
     plt.title("Thresholds por época")
     plt.xlabel("Época")
@@ -532,10 +510,14 @@ def plot_thresholds(post, plots_dir):
     plt.close()
 
 
-def plot_pareto_2d(post, plots_dir):
+def plot_pareto_2d_same_direction(post, plots_dir):
     metric_names = post.metric_names_ or []
+    metric_directions = post.metric_directions_ or []
 
     if len(metric_names) != 2:
+        return
+
+    if len(metric_directions) != 2:
         return
 
     if len(post.history_) == 0:
@@ -548,19 +530,43 @@ def plot_pareto_2d(post, plots_dir):
 
     pareto = np.asarray(post.pareto_front_, dtype=float)
 
+    all_points_plot = all_points.copy()
+
+    all_points_plot[:, 0] = transform_metric_for_plot(
+        all_points[:, 0],
+        metric_directions[0]
+    )
+
+    all_points_plot[:, 1] = transform_metric_for_plot(
+        all_points[:, 1],
+        metric_directions[1]
+    )
+
     plt.figure()
 
     plt.scatter(
-        all_points[:, 0],
-        all_points[:, 1],
+        all_points_plot[:, 0],
+        all_points_plot[:, 1],
         label="Pontos por época",
         alpha=0.5
     )
 
     if pareto.size > 0:
-        plt.scatter(
+        pareto_plot = pareto.copy()
+
+        pareto_plot[:, 0] = transform_metric_for_plot(
             pareto[:, 0],
+            metric_directions[0]
+        )
+
+        pareto_plot[:, 1] = transform_metric_for_plot(
             pareto[:, 1],
+            metric_directions[1]
+        )
+
+        plt.scatter(
+            pareto_plot[:, 0],
+            pareto_plot[:, 1],
             label="Pareto",
             marker="x"
         )
@@ -568,45 +574,114 @@ def plot_pareto_2d(post, plots_dir):
     best_index = getattr(post, "best_index_", None)
 
     if best_index is not None:
-        best_point = np.asarray(post.history_[best_index]["point"], dtype=float)
+        best_point = np.asarray(
+            post.history_[best_index]["point"],
+            dtype=float
+        )
+
+        best_point_plot = best_point.copy()
+
+        best_point_plot[0] = transform_metric_for_plot(
+            best_point[0],
+            metric_directions[0]
+        )
+
+        best_point_plot[1] = transform_metric_for_plot(
+            best_point[1],
+            metric_directions[1]
+        )
 
         plt.scatter(
-            best_point[0],
-            best_point[1],
+            best_point_plot[0],
+            best_point_plot[1],
             label="Selecionado",
             marker="*",
             s=150
         )
 
-    plt.title("Pontos e fronteira de Pareto")
-    plt.xlabel(metric_names[0])
-    plt.ylabel(metric_names[1])
+    xlabel = transformed_metric_name(
+        metric_names[0],
+        metric_directions[0]
+    )
+
+    ylabel = transformed_metric_name(
+        metric_names[1],
+        metric_directions[1]
+    )
+
+    plt.title("Fronteira de Pareto em escala de benefício")
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(plots_dir / "pareto_2d.png", dpi=150)
+    plt.savefig(plots_dir / "pareto_2d_same_direction.png", dpi=150)
+    plt.close()
+
+
+# =========================================================
+# Plots de diagnóstico de gradientes
+# =========================================================
+
+def plot_normalized_losses(post, plots_dir):
+    matrix = gradient_diagnostics_matrix(post)
+
+    columns = matrix["columns"]
+    indices = matrix["indices"]
+
+    if len(columns) == 0 or len(indices) == 0:
+        return
+
+    data = np.asarray(matrix["data"], dtype=float)
+
+    plot_columns = [
+        "loss_norm_cross_entropy",
+        "loss_norm_laplacian_fairness",
+    ]
+
+    plt.figure()
+
+    for name in plot_columns:
+        if name not in columns:
+            continue
+
+        j = columns.index(name)
+        plt.plot(indices, data[:, j], label=name)
+
+    plt.title("Losses normalizadas por época")
+    plt.xlabel("Época")
+    plt.ylabel("Loss normalizada")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(plots_dir / "losses_normalizadas_por_epoca.png", dpi=150)
     plt.close()
 
 
 def plot_alphas(post, plots_dir):
-    diagnostics = history_diagnostics(post)
+    matrix = gradient_diagnostics_matrix(post)
 
-    if len(diagnostics) == 0:
+    columns = matrix["columns"]
+    indices = matrix["indices"]
+
+    if len(columns) == 0 or len(indices) == 0:
         return
 
-    if "alphas" not in diagnostics[0]:
-        return
+    data = np.asarray(matrix["data"], dtype=float)
 
-    epochs = [row["epoch"] for row in diagnostics]
-    alphas = np.asarray([row["alphas"] for row in diagnostics], dtype=float)
-
-    if alphas.ndim != 2:
-        return
+    plot_columns = [
+        "alpha_cross_entropy",
+        "alpha_laplacian_fairness",
+    ]
 
     plt.figure()
 
-    for j in range(alphas.shape[1]):
-        plt.plot(epochs, alphas[:, j], label=f"alpha_{j}")
+    for name in plot_columns:
+        if name not in columns:
+            continue
+
+        j = columns.index(name)
+        plt.plot(indices, data[:, j], label=name)
 
     plt.title("Alphas por época")
     plt.xlabel("Época")
@@ -619,19 +694,22 @@ def plot_alphas(post, plots_dir):
 
 
 def plot_total_loss(post, plots_dir):
-    diagnostics = history_diagnostics(post)
+    matrix = gradient_diagnostics_matrix(post)
 
-    if len(diagnostics) == 0:
+    columns = matrix["columns"]
+    indices = matrix["indices"]
+
+    if len(columns) == 0 or len(indices) == 0:
         return
 
-    if "total_loss" not in diagnostics[0]:
+    if "total_loss" not in columns:
         return
 
-    epochs = [row["epoch"] for row in diagnostics]
-    values = [row["total_loss"] for row in diagnostics]
+    data = np.asarray(matrix["data"], dtype=float)
+    j = columns.index("total_loss")
 
     plt.figure()
-    plt.plot(epochs, values)
+    plt.plot(indices, data[:, j])
     plt.title("Total loss por época")
     plt.xlabel("Época")
     plt.ylabel("Total loss")
@@ -641,26 +719,73 @@ def plot_total_loss(post, plots_dir):
     plt.close()
 
 
-def plot_cosine_similarity_lines(post, plots_dir):
-    cosine = cosine_similarity_by_epoch_matrix(post)
+def plot_gradient_norms(post, plots_dir):
+    matrix = gradient_diagnostics_matrix(post)
 
-    columns = cosine["columns"]
-    indices = cosine["indices"]
-    data = np.asarray(cosine["data"], dtype=float)
+    columns = matrix["columns"]
+    indices = matrix["indices"]
 
     if len(columns) == 0 or len(indices) == 0:
         return
 
+    data = np.asarray(matrix["data"], dtype=float)
+
+    plot_columns = [
+        "grad_norm_raw_cross_entropy",
+        "grad_norm_raw_laplacian_fairness",
+        "grad_norm_norm_cross_entropy",
+        "grad_norm_norm_laplacian_fairness",
+    ]
+
     plt.figure()
 
-    for j, name in enumerate(columns):
+    for name in plot_columns:
+        if name not in columns:
+            continue
+
+        j = columns.index(name)
+        plt.plot(indices, data[:, j], label=name)
+
+    plt.title("Normas dos gradientes por época")
+    plt.xlabel("Época")
+    plt.ylabel("Norma")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(plots_dir / "gradient_norms_por_epoca.png", dpi=150)
+    plt.close()
+
+
+def plot_cosines(post, plots_dir):
+    matrix = gradient_diagnostics_matrix(post)
+
+    columns = matrix["columns"]
+    indices = matrix["indices"]
+
+    if len(columns) == 0 or len(indices) == 0:
+        return
+
+    data = np.asarray(matrix["data"], dtype=float)
+
+    plot_columns = [
+        "cosine_raw",
+        "cosine_normalized",
+    ]
+
+    plt.figure()
+
+    for name in plot_columns:
+        if name not in columns:
+            continue
+
+        j = columns.index(name)
         plt.plot(indices, data[:, j], label=name)
 
     plt.axhline(0.0, linestyle="--", linewidth=1)
 
-    plt.title("Similaridade cosseno entre objetivos por época")
+    plt.title("Similaridade cosseno entre objetivos")
     plt.xlabel("Época")
-    plt.ylabel("Similaridade cosseno")
+    plt.ylabel("Cosseno")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -668,50 +793,42 @@ def plot_cosine_similarity_lines(post, plots_dir):
     plt.close()
 
 
-def plot_cosine_similarity_matrix(post, plots_dir):
-    result = cosine_similarity_matrix(post)
+def plot_descent_dot_products(post, plots_dir):
+    matrix = gradient_diagnostics_matrix(post)
 
-    objective_names = result["columns"]
-    matrix = np.asarray(result["data"], dtype=float)
+    columns = matrix["columns"]
+    indices = matrix["indices"]
 
-    if len(objective_names) == 0:
+    if len(columns) == 0 or len(indices) == 0:
         return
 
-    plt.figure(figsize=(6, 5))
+    data = np.asarray(matrix["data"], dtype=float)
 
-    im = plt.imshow(
-        matrix,
-        vmin=-1,
-        vmax=1
-    )
+    plot_columns = [
+        "dot_raw_cross_entropy",
+        "dot_raw_laplacian_fairness",
+        "dot_norm_cross_entropy",
+        "dot_norm_laplacian_fairness",
+    ]
 
-    plt.colorbar(im, label="Similaridade cosseno média")
+    plt.figure()
 
-    plt.xticks(
-        ticks=np.arange(len(objective_names)),
-        labels=objective_names,
-        rotation=45,
-        ha="right"
-    )
+    for name in plot_columns:
+        if name not in columns:
+            continue
 
-    plt.yticks(
-        ticks=np.arange(len(objective_names)),
-        labels=objective_names
-    )
+        j = columns.index(name)
+        plt.plot(indices, data[:, j], label=name)
 
-    for i in range(matrix.shape[0]):
-        for j in range(matrix.shape[1]):
-            plt.text(
-                j,
-                i,
-                f"{matrix[i, j]:.3f}",
-                ha="center",
-                va="center"
-            )
+    plt.axhline(0.0, linestyle="--", linewidth=1)
 
-    plt.title("Matriz média de similaridade cosseno entre objetivos")
+    plt.title("Produtos internos com a direção de descida")
+    plt.xlabel("Época")
+    plt.ylabel("Produto interno")
+    plt.legend()
+    plt.grid(True)
     plt.tight_layout()
-    plt.savefig(plots_dir / "cosine_similarity_matrix.png", dpi=150)
+    plt.savefig(plots_dir / "descent_dot_products_por_epoca.png", dpi=150)
     plt.close()
 
 
@@ -729,12 +846,12 @@ def diagnose_postprocessor(post, output_dir):
     metadata_dir.mkdir(parents=True, exist_ok=True)
 
     # -----------------------------------------------------
-    # JSONs principais em formato matricial
+    # CSVs matriciais
     # -----------------------------------------------------
 
     save_matrix_csv(
-    metadata_dir / "points_by_epoch.csv",
-    history_points_matrix(post)
+        metadata_dir / "points_by_epoch.csv",
+        history_points_matrix(post)
     )
 
     save_matrix_csv(
@@ -763,13 +880,8 @@ def diagnose_postprocessor(post, output_dir):
     )
 
     save_matrix_csv(
-        metadata_dir / "cosine_similarity_by_epoch.csv",
-        cosine_similarity_by_epoch_matrix(post)
-    )
-
-    save_matrix_csv(
-        metadata_dir / "cosine_similarity_matrix.csv",
-        cosine_similarity_matrix(post)
+        metadata_dir / "gradient_diagnostics_by_epoch.csv",
+        gradient_diagnostics_matrix(post)
     )
 
     # -----------------------------------------------------
@@ -799,9 +911,6 @@ def diagnose_postprocessor(post, output_dir):
                 pareto_unique_points_matrix(post)["data"]
             ),
             "has_gradient_diagnostics": len(history_diagnostics(post)) > 0,
-            "has_cosine_similarity": len(
-                cosine_similarity_by_epoch_matrix(post)["data"]
-            ) > 0,
         }
     )
 
@@ -810,13 +919,18 @@ def diagnose_postprocessor(post, output_dir):
     # -----------------------------------------------------
 
     plot_losses(post, plots_dir)
+    plot_normalized_losses(post, plots_dir)
+
     plot_metrics(post, plots_dir)
     plot_thresholds(post, plots_dir)
-    plot_pareto_2d(post, plots_dir)
+    plot_pareto_2d_same_direction(post, plots_dir)
+
     plot_total_loss(post, plots_dir)
     plot_alphas(post, plots_dir)
-    plot_cosine_similarity_lines(post, plots_dir)
-    plot_cosine_similarity_matrix(post, plots_dir)
+
+    plot_gradient_norms(post, plots_dir)
+    plot_cosines(post, plots_dir)
+    plot_descent_dot_products(post, plots_dir)
 
     return {
         "output_dir": str(output_dir),

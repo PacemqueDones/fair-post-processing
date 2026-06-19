@@ -1,7 +1,11 @@
 from .geometry import FairGeometry
-from .builders import MahalanobisGeometryBuilder
+from .distances import FairDistanceBuilder
+from .laplacian import FairLaplacianBuilder
+from .builders import FairGeometryBuilder
 
 __all__ = [
     "FairGeometry",
-    "MahalanobisGeometryBuilder",
+    "FairDistanceBuilder",
+    "FairLaplacianBuilder",
+    "FairGeometryBuilder",
 ]

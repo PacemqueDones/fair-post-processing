@@ -5,7 +5,11 @@ from fairpp.models import (
     ThresholdRatioDGateModel
 )
 
-from fairpp.geometry import MahalanobisGeometryBuilder
+from fairpp.geometry import (
+    FairDistanceBuilder,
+    FairLaplacianBuilder,
+    FairGeometryBuilder,
+)
 
 from fairpp.objectives.objectives import (
     CrossEntropyObjective,
@@ -13,7 +17,7 @@ from fairpp.objectives.objectives import (
     EqualityOpportunityObjective,
     DemographicParityKLObjective,
     EqualityOpportunityKLObjective,
-    LaplacianFairnessObjective
+    LaplacianFairnessObjective,
 )
 from fairpp.metrics.metrics import (
     BalancedAccuracyMetric,
@@ -24,6 +28,7 @@ from fairpp.metrics.metrics import (
     DemographicParityMetric,
     EqualityOpportunityMetric,
     IndividualFairnessViolationMeanMetric,
+    IndividualFairnessViolationRateMetric
 )
 
 from fairpp.selection.selectors import (
@@ -47,19 +52,6 @@ from pathlib import Path
 #-----------------------------------------------------------------------------
 # Funções auxiliares para avaliação
 #-----------------------------------------------------------------------------
-def resumir_resultados(lista_resultados):
-    keys = lista_resultados[0].keys()
-    resumo = {}
-
-    for key in keys:
-        valores = np.array([r[key] for r in lista_resultados])
-
-        resumo[key] = {
-            "mean": float(valores.mean()),
-            "std": float(valores.std(ddof=1))
-        }
-
-    return resumo
 
 metrics = [
     AccuracyMetric(),
@@ -185,32 +177,48 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     else:
         X_val_lap = X_val.drop(columns=sensitive_cols, errors="ignore")
 
-    builder = MahalanobisGeometryBuilder(
-        theta=1.0,
-        tau_quantile=0.25
+    distance_builder = FairDistanceBuilder(
+        metric="mahalanobis",
+        normalization="fraction",
+        fraction_scale=10.0
     )
 
-    geometry_val = builder.build(X_val_lap)
+    laplacian_builder = FairLaplacianBuilder(
+        metric="mahalanobis",
+        theta=1.0,
+        tau_quantile=0.5,
+        laplacian_type="unnormalized"
+    )
+
+    geometry_val = FairGeometryBuilder(
+        distance_builder=distance_builder,
+        laplacian_builder=laplacian_builder
+    ).build(X_val_lap)
 
     #-------------------------------------------------------------------------
     # Pós-processador
     #-------------------------------------------------------------------------
 
-    motor = ThresholdRatioDGateModel(num_classes=2, alpha=0.5)
+    motor = ThresholdRatioModel(num_classes=2, alpha=0.5)
 
     post = FairPostProcessor(
         model=motor,
         objectives=[
             CrossEntropyObjective(),
-            LaplacianFairnessObjective(L=geometry_val.L)
+            LaplacianFairnessObjective(
+            L=geometry_val.L,
+            fairness_weight=5.0,
+            ce_weight=1.0,
+            normalize=True
+        )
         ],
         selector=TopsisSelector([1, 1]),
         selection_metrics=[
             BalancedAccuracyMetric(),
-            IndividualFairnessViolationMeanMetric(D_X=geometry_val.D_X)
+            IndividualFairnessViolationRateMetric(D_X=geometry_val.D_X)
         ],
-        lr=.5e-2,
-        epochs=300,
+        lr=1e-3,
+        epochs=800,
         track_gradients=True
     )
 

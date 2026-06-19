@@ -1,7 +1,9 @@
 import torch
+
+from .diagnostics import diagnose_postprocessor, GradientDiagnostics
 from .selection.pareto import pareto_front
 from .optimization.multiobjective import CommonDescent
-from .gradients.gradients import GradientDiagnostics
+from .diagnostics.gradients import GradientDiagnostics
 
 
 class FairPostProcessor:
@@ -14,7 +16,9 @@ class FairPostProcessor:
         self.epochs = epochs
 
         # Otimização multiobjetivo
-        self.descent_ = CommonDescent()
+        self.descent_ = CommonDescent(
+            normalize=False
+        )
 
         # Diagnóstico de gradientes
         self.track_gradients = track_gradients
@@ -64,7 +68,7 @@ class FairPostProcessor:
         )
 
     def fit(self, probs, y_true, sensitive_attr):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=self.lr)
 
         probs = torch.tensor(probs, dtype=torch.float32)
         y_true = torch.tensor(y_true, dtype=torch.long)
@@ -76,12 +80,12 @@ class FairPostProcessor:
             losses, loss_dict = self._compute_losses(logits, y_true, sensitive_attr)
             params = self._get_trainable_params()
 
-            if self.track_gradients:
-                grad_norms, cosine_dict = self.gradient_diagnostics.collect(losses, params)
-            else:
-                grad_norms, cosine_dict = {}, {}
-
             total_loss, alphas = self.descent_.combine(losses, params)
+
+            if self.track_gradients:
+                diagnostics = self.descent_.last_diagnostics_
+            else:
+                diagnostics = {}
 
             optimizer.zero_grad()
             total_loss.backward()
@@ -114,16 +118,7 @@ class FairPostProcessor:
                 }
 
                 if self.track_gradients:
-                    epoch_record["diagnostics"] = {
-                        "grad_norms": grad_norms,
-                        "cosine_similarity": cosine_dict,
-                        "total_loss": float(total_loss.detach().cpu()),
-                        "alphas": (
-                            alphas.detach().cpu().tolist()
-                            if torch.is_tensor(alphas)
-                            else list(alphas)
-                        ),
-                    }
+                    epoch_record["diagnostics"] = diagnostics
 
                 self.history_.append(epoch_record)
 
