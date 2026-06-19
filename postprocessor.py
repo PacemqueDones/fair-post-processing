@@ -1,32 +1,33 @@
 import torch
 
-from .diagnostics import diagnose_postprocessor, GradientDiagnostics
 from .selection.pareto import pareto_front
-from .optimization.multiobjective import CommonDescent
-from .diagnostics.gradients import GradientDiagnostics
+from .optimization import build_aggregator
+from torchjd.autojac import backward as jacobian_backward
+from torchjd.autojac import jac_to_grad
 
 
 class FairPostProcessor:
-    def __init__(self, model, objectives, selector, selection_metrics: list | None = None, lr=1e-2, epochs=100, track_gradients: bool = False):
+    def __init__(
+        self,
+        model,
+        objectives,
+        selector,
+        selection_metrics: list | None = None,
+        aggregator: str = "upgrad",
+        normalize_objectives: bool = False,
+        lr: float = 1e-2,
+        epochs: int = 100,
+    ):
+
         self.model = model
         self.objectives = objectives
         self.selector = selector
         self.selection_metrics = selection_metrics or []
+        self.aggregator_name = aggregator
+        self.aggregator_ = build_aggregator(aggregator)
+        self.normalize_objectives = normalize_objectives
         self.lr = lr
         self.epochs = epochs
-
-        # Otimização multiobjetivo
-        self.descent_ = CommonDescent(
-            normalize=False
-        )
-
-        # Diagnóstico de gradientes
-        self.track_gradients = track_gradients
-        self.gradient_diagnostics = (
-            GradientDiagnostics(self.objectives)
-            if track_gradients
-            else None
-        )
 
         # Histórico completo do treinamento.
         # Cada posição de history_ deve representar uma época.
@@ -58,14 +59,7 @@ class FairPostProcessor:
     
     def _get_trainable_params(self):
         return [p for p in self.model.parameters() if p.requires_grad]
-    
-    def _record_diagnostics(self, grad_norms, cosine_dict, total_loss, alphas):
-        self.grad_norm_history_.append(grad_norms)
-        self.cosine_similarity_history_.append(cosine_dict)
-        self.total_loss_history_.append(float(total_loss.detach().cpu()))
-        self.alpha_history_.append(
-            alphas.detach().cpu().tolist() if torch.is_tensor(alphas) else list(alphas)
-        )
+
 
     def fit(self, probs, y_true, sensitive_attr):
         optimizer = torch.optim.SGD(self.model.parameters(), lr=self.lr)
@@ -80,15 +74,13 @@ class FairPostProcessor:
             losses, loss_dict = self._compute_losses(logits, y_true, sensitive_attr)
             params = self._get_trainable_params()
 
-            total_loss, alphas = self.descent_.combine(losses, params)
-
-            if self.track_gradients:
-                diagnostics = self.descent_.last_diagnostics_
-            else:
-                diagnostics = {}
-
             optimizer.zero_grad()
-            total_loss.backward()
+
+            loss_vector = torch.stack(losses)
+
+            jacobian_backward(loss_vector)
+            jac_to_grad(params, self.aggregator_)
+
             optimizer.step()
 
             with torch.no_grad():
@@ -116,9 +108,6 @@ class FairPostProcessor:
                     "point": point,
                     "thresholds": self.model.thresholds.detach().clone(),
                 }
-
-                if self.track_gradients:
-                    epoch_record["diagnostics"] = diagnostics
 
                 self.history_.append(epoch_record)
 

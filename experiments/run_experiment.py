@@ -207,19 +207,19 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
             CrossEntropyObjective(),
             LaplacianFairnessObjective(
             L=geometry_val.L,
-            fairness_weight=5.0,
-            ce_weight=1.0,
+            fairness_weight=2.5,
+            ce_weight=0.0,
             normalize=True
         )
         ],
         selector=TopsisSelector([1, 1]),
         selection_metrics=[
             BalancedAccuracyMetric(),
-            IndividualFairnessViolationRateMetric(D_X=geometry_val.D_X)
+            IndividualFairnessViolationRateMetric(L_const=0.1, D_X=geometry_val.D_X)
         ],
-        lr=1e-3,
-        epochs=800,
-        track_gradients=True
+        aggregator="upgrad",
+        lr=1e-2,
+        epochs=500,
     )
 
     post.fit(probs_val, y_val, s_val)
