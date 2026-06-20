@@ -177,23 +177,23 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     else:
         X_val_lap = X_val.drop(columns=sensitive_cols, errors="ignore")
 
-    distance_builder = FairDistanceBuilder(
-        metric="mahalanobis",
-        normalization="fraction",
-        fraction_scale=10.0
-    )
+    # distance_builder = FairDistanceBuilder(
+    #     metric="mahalanobis",
+    #     normalization="fraction",
+    #     fraction_scale=10.0
+    # )
 
-    laplacian_builder = FairLaplacianBuilder(
-        metric="mahalanobis",
-        theta=1.0,
-        tau_quantile=0.5,
-        laplacian_type="unnormalized"
-    )
+    # laplacian_builder = FairLaplacianBuilder(
+    #     metric="mahalanobis",
+    #     theta=1.0,
+    #     tau_quantile=0.3,
+    #     laplacian_type="unnormalized"
+    # )
 
-    geometry_val = FairGeometryBuilder(
-        distance_builder=distance_builder,
-        laplacian_builder=laplacian_builder
-    ).build(X_val_lap)
+    # geometry_val = FairGeometryBuilder(
+    #     distance_builder=distance_builder,
+    #     laplacian_builder=laplacian_builder
+    # ).build(X_val_lap)
 
     #-------------------------------------------------------------------------
     # Pós-processador
@@ -205,17 +205,19 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
         model=motor,
         objectives=[
             CrossEntropyObjective(),
-            LaplacianFairnessObjective(
-            L=geometry_val.L,
-            fairness_weight=2.5,
-            ce_weight=0.0,
-            normalize=True
-        )
+            EqualityOpportunityObjective(fairness_weight = 10, ce_weight=0.0)
+        #     LaplacianFairnessObjective(
+        #     L=geometry_val.L,
+        #     fairness_weight=2.5,
+        #     ce_weight=0.0,
+        #     normalize=True
+        # )
         ],
         selector=TopsisSelector([1, 1]),
         selection_metrics=[
             BalancedAccuracyMetric(),
-            IndividualFairnessViolationRateMetric(L_const=0.1, D_X=geometry_val.D_X)
+            EqualityOpportunityMetric(),
+            # IndividualFairnessViolationRateMetric(L_const=0.1, D_X=geometry_val.D_X)
         ],
         aggregator="upgrad",
         lr=1e-2,
