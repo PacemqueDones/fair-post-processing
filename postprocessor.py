@@ -14,7 +14,6 @@ class FairPostProcessor:
         selector,
         selection_metrics: list | None = None,
         aggregator: str = "upgrad",
-        normalize_objectives: bool = False,
         lr: float = 1e-2,
         epochs: int = 100,
     ):
@@ -25,7 +24,6 @@ class FairPostProcessor:
         self.selection_metrics = selection_metrics or []
         self.aggregator_name = aggregator
         self.aggregator_ = build_aggregator(aggregator)
-        self.normalize_objectives = normalize_objectives
         self.lr = lr
         self.epochs = epochs
 

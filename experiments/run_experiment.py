@@ -18,6 +18,7 @@ from fairpp.objectives.objectives import (
     DemographicParityKLObjective,
     EqualityOpportunityKLObjective,
     LaplacianFairnessObjective,
+    WassersteinEqualityOpportunityObjective,
 )
 from fairpp.metrics.metrics import (
     BalancedAccuracyMetric,
@@ -177,51 +178,57 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     else:
         X_val_lap = X_val.drop(columns=sensitive_cols, errors="ignore")
 
-    # distance_builder = FairDistanceBuilder(
-    #     metric="mahalanobis",
-    #     normalization="fraction",
-    #     fraction_scale=10.0
-    # )
+    distance_builder = FairDistanceBuilder(
+        metric="mahalanobis",
+        normalization="fraction",
+        fraction_scale=10.0
+    )
 
-    # laplacian_builder = FairLaplacianBuilder(
-    #     metric="mahalanobis",
-    #     theta=1.0,
-    #     tau_quantile=0.3,
-    #     laplacian_type="unnormalized"
-    # )
+    laplacian_builder = FairLaplacianBuilder(
+        metric="mahalanobis",
+        theta=1.0,
+        tau_quantile=0.3,
+        laplacian_type="unnormalized"
+    )
 
-    # geometry_val = FairGeometryBuilder(
-    #     distance_builder=distance_builder,
-    #     laplacian_builder=laplacian_builder
-    # ).build(X_val_lap)
+    geometry_val = FairGeometryBuilder(
+        distance_builder=distance_builder,
+        laplacian_builder=laplacian_builder
+    ).build(X_val_lap)
 
     #-------------------------------------------------------------------------
     # Pós-processador
     #-------------------------------------------------------------------------
 
-    motor = ThresholdRatioModel(num_classes=2, alpha=0.5)
+    motor = ThresholdRatioModel(num_classes=2, alpha=1.0)
 
     post = FairPostProcessor(
         model=motor,
         objectives=[
             CrossEntropyObjective(),
-            EqualityOpportunityObjective(fairness_weight = 10, ce_weight=0.0)
-        #     LaplacianFairnessObjective(
-        #     L=geometry_val.L,
-        #     fairness_weight=2.5,
-        #     ce_weight=0.0,
-        #     normalize=True
-        # )
+            WassersteinEqualityOpportunityObjective(
+                fairness_weight = 2,
+                p=1,
+                blur=0.10,
+                scaling=0.5,
+                debias=False,
+                backend="tensorized",
+            ),
+            LaplacianFairnessObjective(
+            L=geometry_val.L,
+            fairness_weight=2.5,
+            normalize="edges"
+        ),
         ],
-        selector=TopsisSelector([1, 1]),
+        selector=TopsisSelector([1, 1, 1]),
         selection_metrics=[
             BalancedAccuracyMetric(),
-            EqualityOpportunityMetric(),
-            # IndividualFairnessViolationRateMetric(L_const=0.1, D_X=geometry_val.D_X)
+            DemographicParityMetric(),
+            IndividualFairnessViolationRateMetric(L_const=0.1, D_X=geometry_val.D_X),
         ],
         aggregator="upgrad",
-        lr=1e-2,
-        epochs=500,
+        lr=5e-2,
+        epochs=800,
     )
 
     post.fit(probs_val, y_val, s_val)
