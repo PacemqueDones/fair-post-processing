@@ -19,6 +19,7 @@ from fairpp.objectives.objectives import (
     EqualityOpportunityKLObjective,
     LaplacianFairnessObjective,
     WassersteinEqualityOpportunityObjective,
+    WassersteinEqualityOpportunityQuantileObjective,
 )
 from fairpp.metrics.metrics import (
     BalancedAccuracyMetric,
@@ -200,25 +201,21 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     # Pós-processador
     #-------------------------------------------------------------------------
 
-    motor = ThresholdRatioModel(num_classes=2, alpha=1.0)
+    motor = ThresholdRatioDGateModel(num_classes=2, alpha=1.0)
 
     post = FairPostProcessor(
         model=motor,
         objectives=[
             CrossEntropyObjective(),
-            WassersteinEqualityOpportunityObjective(
-                fairness_weight = 2,
+            WassersteinEqualityOpportunityQuantileObjective(
+                fairness_weight = 5,
                 p=1,
-                blur=0.10,
-                scaling=0.5,
-                debias=False,
-                backend="tensorized",
             ),
             LaplacianFairnessObjective(
-            L=geometry_val.L,
-            fairness_weight=2.5,
-            normalize="edges"
-        ),
+                L=geometry_val.L,
+                fairness_weight=2.5,
+                normalize="samples",
+            ),
         ],
         selector=TopsisSelector([1, 1, 1]),
         selection_metrics=[

@@ -124,7 +124,14 @@ class FairLaplacianBuilder:
 
         L = self._build_laplacian(W)
 
-        return torch.tensor(
+        W_tensor = torch.tensor(
+            W,
+            dtype=self.dtype
+        )
+
+        L_tensor = torch.tensor(
             L,
             dtype=self.dtype
         )
+
+        return W_tensor, L_tensor

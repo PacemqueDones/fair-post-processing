@@ -12,9 +12,11 @@ class FairGeometryBuilder:
 
     def build(self, X):
         D_X = self.distance_builder.build(X)
-        L = self.laplacian_builder.build(X)
+
+        W, L = self.laplacian_builder.build(X)
 
         return FairGeometry(
             D_X=D_X,
+            W=W,
             L=L
         )

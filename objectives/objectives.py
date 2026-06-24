@@ -127,7 +127,7 @@ class LaplacianFairnessObjective(Objective):
         L,
         W=None,
         fairness_weight=1.0,
-        ce_weight=0.0,
+        ce_weight=0,
         normalize="samples",
         symmetrize=False,
         eps=1e-8,
@@ -268,7 +268,7 @@ class WassersteinEqualityOpportunityObjective(Objective):
     def __init__(
         self,
         fairness_weight=1.0,
-        ce_weight=0.001,
+        ce_weight=0,
         p=1,
         blur=0.05,
         scaling=0.9,
@@ -307,6 +307,58 @@ class WassersteinEqualityOpportunityObjective(Objective):
             group1 = group1.reshape(-1, 1)
 
             fairness = self.wasserstein(group0, group1)
+
+        ce = F.cross_entropy(logits, y_true)
+
+        return (
+            self.fairness_weight * fairness
+            + self.ce_weight * ce
+        )
+    
+class WassersteinEqualityOpportunityQuantileObjective(Objective):
+    name = "equality_opportunity_wasserstein_quantile"
+
+    def __init__(
+        self,
+        fairness_weight=1.0,
+        ce_weight=0,
+        p=2,
+        num_quantiles=10**4,
+    ):
+        self.fairness_weight = fairness_weight
+        self.ce_weight = ce_weight
+        self.p = p
+        self.num_quantiles = num_quantiles
+
+    def __call__(self, logits, y_true, sensitive_attr):
+        preds_pos = torch.softmax(logits, dim=1)[:, 1]
+        mask_pos = y_true == 1
+
+        group0 = preds_pos[
+            (sensitive_attr == 0) & mask_pos
+        ]
+
+        group1 = preds_pos[
+            (sensitive_attr == 1) & mask_pos
+        ]
+
+        if group0.numel() == 0 or group1.numel() == 0:
+            fairness = logits.sum() * 0.0
+        else:
+            quantile_levels = torch.linspace(
+                0.0,
+                1.0,
+                self.num_quantiles,
+                device=logits.device,
+                dtype=logits.dtype,
+            )
+
+            q0 = torch.quantile(group0, quantile_levels)
+            q1 = torch.quantile(group1, quantile_levels)
+
+            fairness = torch.mean(
+                torch.abs(q0 - q1) ** self.p
+            )
 
         ce = F.cross_entropy(logits, y_true)
 
