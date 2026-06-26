@@ -78,7 +78,7 @@ class ThresholdCategoricalAdditiveRatioModel(nn.Module):
         self,
         num_classes,
         category_sizes,
-        alpha=10.0,
+        alpha=1.0,
         eps=1e-8,
         initial_threshold=0.5,
     ):

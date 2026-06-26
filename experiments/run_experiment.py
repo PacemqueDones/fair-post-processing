@@ -2,7 +2,8 @@
 from fairpp.models import (
     ThresholdRatioModel,
     ThresholdRatioSiLUModel,
-    ThresholdRatioDGateModel
+    ThresholdRatioDGateModel,
+    ThresholdCategoricalAdditiveRatioModel,
 )
 
 from fairpp.geometry import (
@@ -10,17 +11,20 @@ from fairpp.geometry import (
     FairLaplacianBuilder,
     FairGeometryBuilder,
 )
-
-from fairpp.objectives.objectives import (
+from fairpp.objectives.performance import (
     CrossEntropyObjective,
+)
+
+from fairpp.objectives.group import (
     DemographicParityObjective,
     EqualityOpportunityObjective,
-    DemographicParityKLObjective,
-    EqualityOpportunityKLObjective,
-    LaplacianFairnessObjective,
-    WassersteinEqualityOpportunityObjective,
-    WassersteinEqualityOpportunityQuantileObjective,
+
 )
+
+from fairpp.objectives.individual import (
+    LaplacianFairnessObjective,
+)
+
 from fairpp.metrics.metrics import (
     BalancedAccuracyMetric,
     AccuracyMetric,
@@ -64,6 +68,23 @@ metrics = [
     DemographicParityMetric(),
     EqualityOpportunityMetric(),
 ]
+
+def infer_category_sizes(sensitive_attr):
+    sensitive_attr = np.asarray(sensitive_attr)
+
+    if sensitive_attr.ndim == 1:
+        sensitive_attr = sensitive_attr.reshape(-1, 1)
+
+    if sensitive_attr.ndim != 2:
+        raise ValueError(
+            "sensitive_attr deve possuir shape "
+            "(num_samples, num_sensitive_attributes)."
+        )
+
+    return [
+        np.unique(sensitive_attr[:, j]).size
+        for j in range(sensitive_attr.shape[1])
+    ]
 
 #-----------------------------------------------------------------------------
 # Configurações do experimento
@@ -200,16 +221,21 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     #-------------------------------------------------------------------------
     # Pós-processador
     #-------------------------------------------------------------------------
+    category_sizes = infer_category_sizes(
+        s_full
+    )
 
-    motor = ThresholdRatioDGateModel(num_classes=2, alpha=1.0)
+    motor = ThresholdCategoricalAdditiveRatioModel(
+        num_classes=2,
+        category_sizes=category_sizes,
+    )
 
     post = FairPostProcessor(
         model=motor,
         objectives=[
             CrossEntropyObjective(),
-            WassersteinEqualityOpportunityQuantileObjective(
+            DemographicParityObjective(
                 fairness_weight = 5,
-                p=1,
             ),
             LaplacianFairnessObjective(
                 L=geometry_val.L,
@@ -239,7 +265,7 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
         output_dir=fold_dir
     )
 
-    preds_post = post.predict(probs_test)
+    preds_post = post.predict(probs_test, s_test)
 
     #-------------------------------------------------------------------------
     # Avaliação no teste externo

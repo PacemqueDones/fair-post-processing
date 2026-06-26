@@ -36,7 +36,7 @@ class FairPostProcessor:
         self.pareto_indices_ = []
         self.best_index_ = None
 
-        self.best_thresholds_ = None
+        self.best_model_state_ = None
         self.best_metrics_ = None
         self.best_losses_ = None
 
@@ -106,7 +106,7 @@ class FairPostProcessor:
         sensitive_attr = torch.tensor(sensitive_attr, dtype=torch.long)
 
         for epoch in range(self.epochs):
-            logits = self.model(probs)
+            logits = self.model(probs, sensitive_attr)
 
             loss_vector, loss_dict = self._compute_losses(
                 logits,
@@ -124,8 +124,11 @@ class FairPostProcessor:
             optimizer.step()
 
             with torch.no_grad():
-                logits_eval = self.model(probs)
-                y_pred = torch.argmax(logits_eval, dim=1)
+                logits_eval = self.model(probs, sensitive_attr,)
+
+                _, loss_dict_eval = self._compute_losses(logits_eval, y_true, sensitive_attr,)
+
+                y_pred = torch.argmax( logits_eval, dim=1, )
 
                 metric_dict = {}
                 point = []
@@ -143,10 +146,14 @@ class FairPostProcessor:
 
                 epoch_record = {
                     "epoch": epoch,
-                    "losses": loss_dict,
+                    "losses": loss_dict_eval,
                     "metrics": metric_dict,
                     "point": point,
-                    "thresholds": self.model.thresholds.detach().clone(),
+                    "model_state": {
+                        name: tensor.detach().clone()
+                        for name, tensor
+                        in self.model.state_dict().items()
+                    },
                 }
 
                 self.history_.append(epoch_record)
@@ -167,25 +174,52 @@ class FairPostProcessor:
         best_record = self.history_[global_idx]
 
         self.best_index_ = global_idx
-        self.best_thresholds_ = best_record["thresholds"]
+        self.best_model_state_ = best_record["model_state"]
+        self.model.load_state_dict(self.best_model_state_)
         self.best_metrics_ = best_record["metrics"]
         self.best_losses_ = best_record["losses"]
 
         return self
+    
+    def _check_is_fitted(self):
+        if self.best_model_state_ is None:
+            raise RuntimeError(
+                "O FairPostProcessor ainda não foi ajustado. "
+                "Execute fit antes de predict ou predict_proba."
+            )
 
-    def predict(self, probs):
-        probs = torch.tensor(probs, dtype=torch.float32)
+    def predict(
+        self,
+        probs,
+        sensitive_attr=None,
+    ):
+        self._check_is_fitted()
+        probs = torch.as_tensor(probs, dtype=torch.float32,
+        )
+
+        if sensitive_attr is not None:
+            sensitive_attr = torch.as_tensor(sensitive_attr, dtype=torch.long)
+
         with torch.no_grad():
-            self.model.thresholds.copy_(self.best_thresholds_)
-            logits = self.model(probs)
+            self.model.load_state_dict(self.best_model_state_)
+
+            logits = self.model(probs, sensitive_attr)
+
             return torch.argmax(logits, dim=1).cpu().numpy()
         
-    def predict_proba(self, probs):
-        probs = torch.tensor(probs, dtype=torch.float32)
-        with torch.no_grad():
-            self.model.thresholds.copy_(self.best_thresholds_)
-            logits = self.model(probs)
-            return torch.softmax(logits, dim=1).cpu().numpy()
+    def predict_proba(
+        self,
+        probs,
+        sensitive_attr=None,
+    ):
+        probs = torch.as_tensor(probs, dtype=torch.float32)
 
-    def get_thresholds(self):
-        return self.best_thresholds_
+        if sensitive_attr is not None:
+            sensitive_attr = torch.as_tensor(sensitive_attr,dtype=torch.long)
+
+        with torch.no_grad():
+            self.model.load_state_dict(self.best_model_state_)
+
+            logits = self.model(probs,sensitive_attr)
+
+            return torch.softmax(logits,dim=1,).cpu().numpy()
