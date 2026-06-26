@@ -44,16 +44,55 @@ class FairPostProcessor:
         self.metric_names_ = None
         self.metric_directions_ = None
 
-    def _compute_losses(self, logits, y_true, sensitive_attr):
+    def _compute_losses(
+        self,
+        logits,
+        y_true,
+        sensitive_attr,
+    ):
         losses = []
         loss_dict = {}
 
-        for obj in self.objectives:
-            loss = obj(logits, y_true, sensitive_attr)
-            losses.append(loss)
-            loss_dict[obj.name] = loss.item()
+        for objective in self.objectives:
+            objective_losses, objective_names = objective(
+                logits,
+                y_true,
+                sensitive_attr,
+            )
 
-        return losses, loss_dict
+            if len(objective_losses) != len(objective_names):
+                raise ValueError(
+                    f"Objective '{objective.name}' returned "
+                    f"{len(objective_losses)} losses but "
+                    f"{len(objective_names)} names."
+                )
+
+            for loss_name, loss in zip(
+                objective_names,
+                objective_losses,
+            ):
+                if loss.ndim != 0:
+                    raise ValueError(
+                        f"Loss '{loss_name}' must be a scalar tensor, "
+                        f"but received shape {tuple(loss.shape)}."
+                    )
+
+                if loss_name in loss_dict:
+                    raise ValueError(
+                        f"Duplicated loss name: '{loss_name}'."
+                    )
+
+                losses.append(loss)
+                loss_dict[loss_name] = loss.detach().item()
+
+        if not losses:
+            raise ValueError(
+                "No losses were returned by the objectives."
+            )
+
+        loss_vector = torch.stack(losses)
+
+        return loss_vector, loss_dict
     
     def _get_trainable_params(self):
         return [p for p in self.model.parameters() if p.requires_grad]
@@ -69,12 +108,15 @@ class FairPostProcessor:
         for epoch in range(self.epochs):
             logits = self.model(probs)
 
-            losses, loss_dict = self._compute_losses(logits, y_true, sensitive_attr)
+            loss_vector, loss_dict = self._compute_losses(
+                logits,
+                y_true,
+                sensitive_attr,
+            )
+
             params = self._get_trainable_params()
 
             optimizer.zero_grad()
-
-            loss_vector = torch.stack(losses)
 
             jacobian_backward(loss_vector)
             jac_to_grad(params, self.aggregator_)

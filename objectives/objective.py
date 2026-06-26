@@ -1,10 +1,14 @@
 from abc import ABC, abstractmethod
+
 import torch
 
 
 class Objective(ABC):
     """
-    Classe base para todas as funções objetivo do pós-processador.
+    Base class for post-processing objectives.
+
+    Every objective returns a list of scalar losses and a
+    corresponding list of unique names.
     """
 
     name: str = None
@@ -12,27 +16,32 @@ class Objective(ABC):
     @abstractmethod
     def __call__(
         self,
-        scores: torch.Tensor,
+        logits: torch.Tensor,
         y_true: torch.Tensor,
-        sensitive_attr: torch.Tensor
-    ) -> torch.Tensor:
+        sensitive_attr: torch.Tensor,
+    ) -> tuple[list[torch.Tensor], list[str]]:
         """
-        Calcula o valor da função objetivo.
+        Compute one or more scalar objective losses.
 
         Parameters
         ----------
-        scores : torch.Tensor
-            Saída do modelo após aplicação da regra de decisão suave.
+        logits
+            Model outputs after the smooth decision rule.
 
-        y_true : torch.Tensor
-            Rótulos verdadeiros.
+        y_true
+            Ground-truth labels.
 
-        sensitive_attr : torch.Tensor
-            Atributo sensível.
+        sensitive_attr
+            Sensitive attribute vector or matrix.
 
         Returns
         -------
-        torch.Tensor
-            Valor escalar da função objetivo.
+        losses
+            List of scalar tensors. Each tensor is treated as an
+            independent objective by the Jacobian-based optimizer.
+
+        names
+            Unique name for each returned loss. The order must match
+            the order of ``losses``.
         """
         ...
