@@ -66,12 +66,12 @@ metrics = [
     PrecisionMetric(),
     F1ScoreMetric(),
     DemographicParityMetric(
-        group_reduction="mean",
-        attribute_reduction="mean"
+        group_reduction="max",
+        attribute_reduction="max"
     ),
     EqualityOpportunityMetric(
-        group_reduction="mean",
-        attribute_reduction="mean"
+        group_reduction="max",
+        attribute_reduction="max"
     ),
 ]
 
@@ -200,28 +200,28 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     # Laplaciano: com ou sem atributo sensível
     #-------------------------------------------------------------------------
 
-    if USE_SENSITIVE_IN_LAPLACIAN:
-        X_val_lap = X_val.copy()
-    else:
-        X_val_lap = X_val.drop(columns=sensitive_cols, errors="ignore")
+    # if USE_SENSITIVE_IN_LAPLACIAN:
+    #     X_val_lap = X_val.copy()
+    # else:
+    #     X_val_lap = X_val.drop(columns=sensitive_cols, errors="ignore")
 
-    distance_builder = FairDistanceBuilder(
-        metric="mahalanobis",
-        normalization="fraction",
-        fraction_scale=10.0
-    )
+    # distance_builder = FairDistanceBuilder(
+    #     metric="mahalanobis",
+    #     normalization="fraction",
+    #     fraction_scale=10.0
+    # )
 
-    laplacian_builder = FairLaplacianBuilder(
-        metric="mahalanobis",
-        theta=1.0,
-        tau_quantile=0.3,
-        laplacian_type="unnormalized"
-    )
+    # laplacian_builder = FairLaplacianBuilder(
+    #     metric="mahalanobis",
+    #     theta=1.0,
+    #     tau_quantile=0.3,
+    #     laplacian_type="unnormalized"
+    # )
 
-    geometry_val = FairGeometryBuilder(
-        distance_builder=distance_builder,
-        laplacian_builder=laplacian_builder
-    ).build(X_val_lap)
+    # geometry_val = FairGeometryBuilder(
+    #     distance_builder=distance_builder,
+    #     laplacian_builder=laplacian_builder
+    # ).build(X_val_lap)
 
     #-------------------------------------------------------------------------
     # Pós-processador
@@ -235,24 +235,24 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
         objectives=[
             CrossEntropyObjective(),
             DemographicParityObjective(
-                fairness_weight = 4,
-                group_reduction="mean",
-                attribute_reduction="none",
+                fairness_weight = 8,
+                group_reduction="max",
+                attribute_reduction="max",
             ),
-            LaplacianFairnessObjective(
-                L=geometry_val.L,
-                fairness_weight=2.5,
-                normalize="samples",
-            ),
+            # LaplacianFairnessObjective(
+            #     L=geometry_val.L,
+            #     fairness_weight=2.5,
+            #     normalize="samples",
+            # ),
         ],
-        selector=TopsisSelector([1, 1, 1]),
+        selector=TopsisSelector([1, 2]),
         selection_metrics=[
             BalancedAccuracyMetric(),
             DemographicParityMetric(
-                group_reduction="mean",
-                attribute_reduction="mean",
+                group_reduction="max",
+                attribute_reduction="max",
             ),
-            IndividualFairnessViolationRateMetric(L_const=0.1, D_X=geometry_val.D_X),
+            # IndividualFairnessViolationRateMetric(L_const=0.1, D_X=geometry_val.D_X),
         ],
         aggregator="upgrad",
         lr=5e-2,
