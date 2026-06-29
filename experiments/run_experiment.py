@@ -25,7 +25,7 @@ from fairpp.objectives.individual import (
     LaplacianFairnessObjective,
 )
 
-from fairpp.metrics.metrics import (
+from fairpp.metrics import (
     BalancedAccuracyMetric,
     AccuracyMetric,
     PrecisionMetric,
@@ -65,9 +65,16 @@ metrics = [
     RecallMetric(),
     PrecisionMetric(),
     F1ScoreMetric(),
-    DemographicParityMetric(),
-    EqualityOpportunityMetric(),
+    DemographicParityMetric(
+        group_reduction="mean",
+        attribute_reduction="mean"
+    ),
+    EqualityOpportunityMetric(
+        group_reduction="mean",
+        attribute_reduction="mean"
+    ),
 ]
+
 
 def infer_category_sizes(sensitive_attr):
     sensitive_attr = np.asarray(sensitive_attr)
@@ -113,8 +120,7 @@ sensitive_cols = data["sensitive_cols"]
 
 X_full = data["X_full_processed"]
 y_full = data["y_full"].to_numpy().ravel()
-s_full = data["s_full"].to_numpy().ravel()
-
+s_full = data["s_full"].to_numpy()
 
 #-----------------------------------------------------------------------------
 # Divisão e preparação do dados
@@ -137,7 +143,6 @@ if USE_SENSITIVE_IN_MODEL:
     X_test_model = X_test.copy()
 else:
     X_test_model = X_test.drop(columns=sensitive_cols, errors="ignore")
-
 
 #-----------------------------------------------------------------------------
 # K-Fold dentro do treino
@@ -221,21 +226,18 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     #-------------------------------------------------------------------------
     # Pós-processador
     #-------------------------------------------------------------------------
-    category_sizes = infer_category_sizes(
-        s_full
-    )
+    category_sizes = infer_category_sizes(s_full)
 
-    motor = ThresholdCategoricalAdditiveRatioModel(
-        num_classes=2,
-        category_sizes=category_sizes,
-    )
+    motor = ThresholdCategoricalAdditiveRatioModel(num_classes=2, category_sizes=category_sizes)
 
     post = FairPostProcessor(
         model=motor,
         objectives=[
             CrossEntropyObjective(),
             DemographicParityObjective(
-                fairness_weight = 5,
+                fairness_weight = 4,
+                group_reduction="mean",
+                attribute_reduction="none",
             ),
             LaplacianFairnessObjective(
                 L=geometry_val.L,
@@ -246,7 +248,10 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
         selector=TopsisSelector([1, 1, 1]),
         selection_metrics=[
             BalancedAccuracyMetric(),
-            DemographicParityMetric(),
+            DemographicParityMetric(
+                group_reduction="mean",
+                attribute_reduction="mean",
+            ),
             IndividualFairnessViolationRateMetric(L_const=0.1, D_X=geometry_val.D_X),
         ],
         aggregator="upgrad",
@@ -291,7 +296,6 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     posts.append(post)
     models.append(model)
 
-    print("Thresholds:", post.get_thresholds())
     print()
     print("Solução com post-processing:", metricas_post)
     print("Solução sem post-processing:", metricas_base)

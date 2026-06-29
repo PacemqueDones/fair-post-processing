@@ -4,55 +4,49 @@ import torch.nn.functional as F
 from .objective import Objective
 from .reduction import reduce_losses
 from .validation import (
-    prepare_binary_sensitive_attributes,
+    prepare_categorical_sensitive_attributes,
 )
 
+class _MarginalMultigroupObjective(Objective):
+    """Shared machinery for marginal multigroup fairness objectives."""
 
-class DemographicParityObjective(Objective):
-    name = "demographic_parity"
+    valid_reductions = {
+        "none",
+        "mean",
+        "sum",
+        "max",
+    }
 
-    def __init__(
-        self,
-        fairness_weight=1.0,
-        ce_weight=0.0,
-        relaxation="mean",
-        sensitive_indices=None,
-        reduction="none",
-        eps=1e-7,
-    ):
-        valid_relaxations = {
-            "mean",
-            "kl",
-        }
-
-        if relaxation not in valid_relaxations:
+    def _validate_reductions(self):
+        if self.group_reduction not in self.valid_reductions:
             raise ValueError(
-                "relaxation must be either "
-                "'mean' or 'kl'."
+                "group_reduction must be 'none', 'mean', "
+                "'sum', or 'max'."
             )
 
-        self.fairness_weight = fairness_weight
-        self.ce_weight = ce_weight
-        self.relaxation = relaxation
-        self.sensitive_indices = sensitive_indices
-        self.reduction = reduction
-        self.eps = eps
+        if self.attribute_reduction not in self.valid_reductions:
+            raise ValueError(
+                "attribute_reduction must be 'none', "
+                "'mean', 'sum', or 'max'."
+            )
 
-        self.name = (
-            f"demographic_parity_{relaxation}"
-        )
+        if (
+            self.group_reduction == "none"
+            and self.attribute_reduction != "none"
+        ):
+            raise ValueError(
+                "attribute_reduction must be 'none' when "
+                "group_reduction is 'none', because each "
+                "attribute returns a different number of "
+                "pairwise losses."
+            )
 
-    def _kl_bern(
-        self,
-        p0,
-        p1,
-    ):
+    def _kl_bern(self, p0, p1):
         p0 = torch.clamp(
             p0,
             min=self.eps,
             max=1.0 - self.eps,
         )
-
         p1 = torch.clamp(
             p1,
             min=self.eps,
@@ -68,61 +62,157 @@ class DemographicParityObjective(Objective):
             )
         )
 
-    def _compute_attribute_loss(
-        self,
-        preds_pos,
-        attribute,
-        logits,
-    ):
-        group0 = preds_pos[
-            attribute == 0
-        ]
-
-        group1 = preds_pos[
-            attribute == 1
-        ]
-
-        if group0.numel() == 0 or group1.numel() == 0:
-            return logits.sum() * 0.0
-
-        p0 = group0.mean()
-        p1 = group1.mean()
-
+    def _pairwise_disparity(self, left, right):
         if self.relaxation == "mean":
-            return torch.abs(
-                p0 - p1
-            )
+            return torch.abs(left - right)
 
         return (
-            self._kl_bern(p0, p1)
-            + self._kl_bern(p1, p0)
+            self._kl_bern(left, right)
+            + self._kl_bern(right, left)
         )
 
-    def __call__(
+    def _compute_group_means(
         self,
-        logits,
-        y_true,
-        sensitive_attr,
+        values,
+        attribute,
     ):
-        (
-            sensitive_attr,
-            sensitive_indices,
-        ) = prepare_binary_sensitive_attributes(
-            sensitive_attr=sensitive_attr,
-            num_samples=logits.shape[0],
-            sensitive_indices=self.sensitive_indices,
+        groups = torch.unique(attribute, sorted=True)
+        means = []
+        valid_groups = []
+
+        for group in groups:
+            group_values = values[attribute == group]
+
+            if group_values.numel() == 0:
+                continue
+
+            means.append(group_values.mean())
+            valid_groups.append(group)
+
+        return means, valid_groups
+
+    def _reduce_within_attribute(
+        self,
+        means,
+        groups,
+        attribute_name,
+        logits,
+    ):
+        if len(means) < 2:
+            zero = logits.sum() * 0.0
+            return [zero], [f"{attribute_name}_insufficient_groups"]
+
+        # For absolute differences between scalar means:
+        # max_{a,b} |mu_a - mu_b| = max(mu) - min(mu).
+        # This avoids constructing O(K^2) pairs.
+        if (
+            self.relaxation == "mean"
+            and self.group_reduction == "max"
+        ):
+            means_tensor = torch.stack(means)
+            disparity = (
+                means_tensor.max()
+                - means_tensor.min()
+            )
+            return [disparity], [f"{attribute_name}_max"]
+
+        pair_losses = []
+        pair_names = []
+
+        for left_index in range(len(means) - 1):
+            for right_index in range(
+                left_index + 1,
+                len(means),
+            ):
+                left_group = groups[left_index].item()
+                right_group = groups[right_index].item()
+
+                pair_losses.append(
+                    self._pairwise_disparity(
+                        means[left_index],
+                        means[right_index],
+                    )
+                )
+                pair_names.append(
+                    f"{attribute_name}_group_"
+                    f"{left_group}_vs_{right_group}"
+                )
+
+        return reduce_losses(
+            losses=pair_losses,
+            names=pair_names,
+            reduction=self.group_reduction,
+            reduced_name=attribute_name,
         )
 
-        preds_pos = torch.softmax(
-            logits,
-            dim=1,
-        )[:, 1]
+    def _add_weights_and_ce(
+        self,
+        losses,
+        ce,
+    ):
+        return [
+            self.fairness_weight * loss
+            + self.ce_weight * ce
+            for loss in losses
+        ]
+
+    def _finalize_attributes(
+        self,
+        losses,
+        names,
+    ):
+        return reduce_losses(
+            losses=losses,
+            names=names,
+            reduction=self.attribute_reduction,
+            reduced_name=self.name,
+        )
+
+
+class DemographicParityObjective(_MarginalMultigroupObjective):
+    name = "demographic_parity"
+
+    def __init__(
+        self,
+        fairness_weight=1.0,
+        ce_weight=0.0,
+        relaxation="mean",
+        sensitive_indices=None,
+        group_reduction="max",
+        attribute_reduction='none',
+        eps=1e-7,
+    ):
+        valid_relaxations = {"mean", "kl"}
+
+        if relaxation not in valid_relaxations:
+            raise ValueError(
+                "relaxation must be either 'mean' or 'kl'."
+            )
+
+        self.fairness_weight = fairness_weight
+        self.ce_weight = ce_weight
+        self.relaxation = relaxation
+        self.sensitive_indices = sensitive_indices
+        self.group_reduction = group_reduction
+        self.attribute_reduction = attribute_reduction
+        self.eps = eps
+        self.name = f"demographic_parity_{relaxation}"
+
+        self._validate_reductions()
+
+    def __call__(self, logits, y_true, sensitive_attr):
+        sensitive_attr, sensitive_indices = (
+            prepare_categorical_sensitive_attributes(
+                sensitive_attr=sensitive_attr,
+                num_samples=logits.shape[0],
+                sensitive_indices=self.sensitive_indices,
+            )
+        )
+
+        preds_pos = torch.softmax(logits, dim=1)[:, 1]
 
         if self.ce_weight > 0:
-            ce = F.cross_entropy(
-                logits,
-                y_true,
-            )
+            ce = F.cross_entropy(logits, y_true)
         else:
             ce = logits.sum() * 0.0
 
@@ -132,38 +222,40 @@ class DemographicParityObjective(Objective):
         for local_index, original_index in enumerate(
             sensitive_indices
         ):
-            attribute = sensitive_attr[
-                :,
-                local_index,
-            ]
+            attribute = sensitive_attr[:, local_index]
+            attribute_name = (
+                f"{self.name}_attribute_{original_index}"
+            )
 
-            fairness = self._compute_attribute_loss(
-                preds_pos=preds_pos,
+            means, groups = self._compute_group_means(
+                values=preds_pos,
                 attribute=attribute,
-                logits=logits,
             )
 
-            loss = (
-                self.fairness_weight * fairness
-                + self.ce_weight * ce
+            attribute_losses, attribute_names = (
+                self._reduce_within_attribute(
+                    means=means,
+                    groups=groups,
+                    attribute_name=attribute_name,
+                    logits=logits,
+                )
             )
 
-            loss_name = (
-                f"{self.name}_attribute_"
-                f"{original_index}"
+            losses.extend(
+                self._add_weights_and_ce(
+                    losses=attribute_losses,
+                    ce=ce,
+                )
             )
+            names.extend(attribute_names)
 
-            losses.append(loss)
-            names.append(loss_name)
-
-        return reduce_losses(
+        return self._finalize_attributes(
             losses=losses,
             names=names,
-            reduction=self.reduction,
-            reduced_name=self.name,
         )
-    
-class EqualityOpportunityObjective(Objective):
+
+
+class EqualityOpportunityObjective(_MarginalMultigroupObjective):
     name = "equality_opportunity"
 
     def __init__(
@@ -171,71 +263,91 @@ class EqualityOpportunityObjective(Objective):
         fairness_weight=1.0,
         ce_weight=0.0,
         relaxation="mean",
+        sensitive_indices=None,
+        group_reduction="max",
+        attribute_reduction="none",
+        positive_label=1,
         eps=1e-7,
     ):
         valid_relaxations = {"mean", "kl"}
 
         if relaxation not in valid_relaxations:
             raise ValueError(
-                "relaxation must be either  'mean' or 'kl'."
+                "relaxation must be either 'mean' or 'kl'."
             )
+
 
         self.fairness_weight = fairness_weight
         self.ce_weight = ce_weight
         self.relaxation = relaxation
+        self.sensitive_indices = sensitive_indices
+        self.group_reduction = group_reduction
+        self.attribute_reduction = attribute_reduction
+        self.positive_label = positive_label
         self.eps = eps
-
         self.name = f"equality_opportunity_{relaxation}"
 
-    def _kl_bern(self, p0, p1):
-        p0 = torch.clamp(p0, min=self.eps, max=1.0 - self.eps,)
+        self._validate_reductions()
 
-        p1 = torch.clamp(p1, min=self.eps, max=1.0 - self.eps,)
-
-        return (p0 * torch.log(p0 / p1) + (1.0 - p0) * torch.log((1.0 - p0) / (1.0 - p1)))
-
-    def __call__(
-        self,
-        logits,
-        y_true,
-        sensitive_attr,
-    ):
-        
-        self._validate_binary_sensitive_attr(
-            sensitive_attr=sensitive_attr,
-            num_samples=logits.shape[0],
+    def __call__(self, logits, y_true, sensitive_attr):
+        sensitive_attr, sensitive_indices = (
+            prepare_categorical_sensitive_attributes(
+                sensitive_attr=sensitive_attr,
+                num_samples=logits.shape[0],
+                sensitive_indices=self.sensitive_indices,
+            )
         )
 
-        preds_pos = torch.softmax(logits, dim=1, )[:, 1]
-
-        mask_pos = y_true == 1
-
-        group0 = preds_pos[(sensitive_attr == 0) & mask_pos]
-
-        group1 = preds_pos[(sensitive_attr == 1) & mask_pos]
+        preds_pos = torch.softmax(logits, dim=1)[:, 1]
+        positive_mask = y_true == self.positive_label
 
         if self.ce_weight > 0:
             ce = F.cross_entropy(logits, y_true)
         else:
-            ce = 0
+            ce = logits.sum() * 0.0
 
-        if group0.numel() == 0 or group1.numel() == 0:
-            fairness = logits.sum() * 0.0
+        losses = []
+        names = []
 
-        else:
-            p0 = group0.mean()
-            p1 = group1.mean()
+        for local_index, original_index in enumerate(
+            sensitive_indices
+        ):
+            attribute = sensitive_attr[:, local_index]
+            attribute_name = (
+                f"{self.name}_attribute_{original_index}"
+            )
 
-            if self.relaxation == "mean":
-                fairness = torch.abs(p0 - p1)
+            conditional_values = preds_pos[positive_mask]
+            conditional_attribute = attribute[positive_mask]
 
-            else:
-                fairness = (self._kl_bern(p0, p1) + self._kl_bern(p1, p0))
+            means, groups = self._compute_group_means(
+                values=conditional_values,
+                attribute=conditional_attribute,
+            )
 
-        loss = (self.fairness_weight * fairness + self.ce_weight * ce)
+            attribute_losses, attribute_names = (
+                self._reduce_within_attribute(
+                    means=means,
+                    groups=groups,
+                    attribute_name=attribute_name,
+                    logits=logits,
+                )
+            )
 
-        return [loss], [self.name] 
-    
+            losses.extend(
+                self._add_weights_and_ce(
+                    losses=attribute_losses,
+                    ce=ce,
+                )
+            )
+            names.extend(attribute_names)
+
+        return self._finalize_attributes(
+            losses=losses,
+            names=names,
+        )
+
+
 class WassersteinEqualityOpportunityObjective(Objective):
     name = "equality_opportunity_wasserstein"
 

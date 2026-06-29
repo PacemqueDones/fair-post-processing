@@ -1,7 +1,7 @@
 import torch
 
 
-def prepare_binary_sensitive_attributes(
+def prepare_categorical_sensitive_attributes(
     sensitive_attr,
     num_samples,
     sensitive_indices=None,
@@ -28,9 +28,9 @@ def prepare_binary_sensitive_attributes(
     num_attributes = sensitive_attr.shape[1]
 
     if sensitive_indices is None:
-        sensitive_indices = list(
-            range(num_attributes)
-        )
+        sensitive_indices = list(range(num_attributes))
+    else:
+        sensitive_indices = list(sensitive_indices)
 
     if not sensitive_indices:
         raise ValueError(
@@ -56,6 +56,44 @@ def prepare_binary_sensitive_attributes(
         sensitive_indices,
     ]
 
+    if torch.is_floating_point(selected_sensitive_attr):
+        if not torch.isfinite(selected_sensitive_attr).all():
+            raise ValueError(
+                "Selected sensitive attributes cannot "
+                "contain NaN or infinite values."
+            )
+
+    for local_index, original_index in enumerate(
+        sensitive_indices
+    ):
+        groups = torch.unique(
+            selected_sensitive_attr[:, local_index]
+        )
+
+        if groups.numel() < 2:
+            raise ValueError(
+                f"Sensitive attribute {original_index} must "
+                "contain at least two groups. "
+                f"Found values: "
+                f"{groups.detach().cpu().tolist()}."
+            )
+
+    return selected_sensitive_attr, sensitive_indices
+
+
+def prepare_binary_sensitive_attributes(
+    sensitive_attr,
+    num_samples,
+    sensitive_indices=None,
+):
+    selected_sensitive_attr, sensitive_indices = (
+        prepare_categorical_sensitive_attributes(
+            sensitive_attr=sensitive_attr,
+            num_samples=num_samples,
+            sensitive_indices=sensitive_indices,
+        )
+    )
+
     invalid_values = selected_sensitive_attr[
         (selected_sensitive_attr != 0)
         & (selected_sensitive_attr != 1)
@@ -73,7 +111,4 @@ def prepare_binary_sensitive_attributes(
             f"{unique_invalid_values.detach().cpu().tolist()}."
         )
 
-    return (
-        selected_sensitive_attr,
-        sensitive_indices,
-    )
+    return selected_sensitive_attr, sensitive_indices
