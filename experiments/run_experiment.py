@@ -3,7 +3,9 @@ from fairpp.models import (
     ThresholdRatioModel,
     ThresholdRatioSiLUModel,
     ThresholdRatioDGateModel,
+    LogitAffineModel,
     ThresholdCategoricalAdditiveRatioModel,
+    LogitCategoricalAdditiveModel,
 )
 
 from fairpp.geometry import (
@@ -49,6 +51,7 @@ from fairpp.postprocessor import FairPostProcessor
 from pprep.pipeline import prepare_dataset_from_yaml
 
 from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split, StratifiedKFold
 
 import numpy as np
@@ -66,12 +69,12 @@ metrics = [
     PrecisionMetric(),
     F1ScoreMetric(),
     DemographicParityMetric(
-        group_reduction="max",
-        attribute_reduction="max"
+        within_attribute_reduction="max",
+        across_attribute_reduction="max",
     ),
     EqualityOpportunityMetric(
-        group_reduction="max",
-        attribute_reduction="max"
+        within_attribute_reduction="max",
+        across_attribute_reduction="max",
     ),
 ]
 
@@ -188,7 +191,7 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
         X_train_model = X_train.drop(columns=sensitive_cols, errors="ignore")
         X_val_model = X_val.drop(columns=sensitive_cols, errors="ignore")
 
-    model = LogisticRegression(max_iter=1000)
+    model = MLPClassifier(hidden_layer_sizes=(32, 16), max_iter=1000)
     model.fit(X_train_model, y_train)
 
     probs_val = model.predict_proba(X_val_model)
@@ -228,16 +231,16 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
     #-------------------------------------------------------------------------
     category_sizes = infer_category_sizes(s_full)
 
-    motor = ThresholdCategoricalAdditiveRatioModel(num_classes=2, category_sizes=category_sizes)
+    motor = LogitCategoricalAdditiveModel(alpha = 8, num_classes = 2, category_sizes = category_sizes)
 
     post = FairPostProcessor(
         model=motor,
         objectives=[
             CrossEntropyObjective(),
             DemographicParityObjective(
-                fairness_weight = 8,
-                group_reduction="max",
-                attribute_reduction="max",
+                fairness_weight = 4,
+                within_attribute_reduction="max",
+                across_attribute_reduction="none",
             ),
             # LaplacianFairnessObjective(
             #     L=geometry_val.L,
@@ -245,17 +248,17 @@ for fold, (train_pos, val_pos) in enumerate(skf.split(train_idx, y_full[train_id
             #     normalize="samples",
             # ),
         ],
-        selector=TopsisSelector([1, 2]),
+        selector=TopsisSelector([1, 5]),
         selection_metrics=[
             BalancedAccuracyMetric(),
             DemographicParityMetric(
-                group_reduction="max",
-                attribute_reduction="max",
+                within_attribute_reduction="max",
+                across_attribute_reduction="max",
             ),
             # IndividualFairnessViolationRateMetric(L_const=0.1, D_X=geometry_val.D_X),
         ],
         aggregator="upgrad",
-        lr=5e-2,
+        lr=5e-3,
         epochs=800,
     )
 

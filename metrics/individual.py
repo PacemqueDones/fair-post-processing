@@ -13,11 +13,11 @@ class IndividualFairnessViolationMeanMetric(Metric):
         self.L_const = L_const
         self.block_size = block_size
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
-        if scores is None:
-            raise ValueError("IFV mean precisa receber scores.")
+    def __call__(self, y_true, y_pred, sensitive_attr=None, logits=None):
+        if logits is None:
+            raise ValueError("IFV mean precisa receber logits.")
 
-        probabilities = torch.softmax(scores, dim=1)
+        probabilities = torch.softmax(logits, dim=1)
         device = probabilities.device
         dtype = probabilities.dtype
 
@@ -67,11 +67,11 @@ class IndividualFairnessViolationRateMetric(Metric):
         self.L_const = L_const
         self.block_size = block_size
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
-        if scores is None:
-            raise ValueError("IFV rate precisa receber scores.")
+    def __call__(self, y_true, y_pred, sensitive_attr=None, logits=None):
+        if logits is None:
+            raise ValueError("IFV rate precisa receber logits.")
 
-        probabilities = torch.softmax(scores, dim=1)
+        probabilities = torch.softmax(logits, dim=1)
         device = probabilities.device
         dtype = probabilities.dtype
 

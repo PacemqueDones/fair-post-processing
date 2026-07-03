@@ -13,20 +13,25 @@ class DemographicParityMetric(Metric):
     def __init__(
         self,
         sensitive_indices=None,
-        group_reduction="max",
-        attribute_reduction="max",
+        within_attribute_reduction="max",
+        across_attribute_reduction="max",
         name=None,
     ):
+        
         self.sensitive_indices = sensitive_indices
-        self.group_reduction = group_reduction
-        self.attribute_reduction = attribute_reduction
+        self.within_attribute_reduction = (
+            within_attribute_reduction
+        )
+        self.across_attribute_reduction = (
+            across_attribute_reduction
+        )
 
         if name is not None:
             self.name = name
         elif sensitive_indices is not None and len(sensitive_indices) == 1:
             self.name = f"ddp_attribute_{sensitive_indices[0]}"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None, logits=None):
         y_pred = torch.as_tensor(y_pred).view(-1)
 
         sensitive_attr, sensitive_indices = prepare_sensitive_attributes(
@@ -51,14 +56,14 @@ class DemographicParityMetric(Metric):
 
             disparity = reduce_group_rates(
                 group_rates=group_rates,
-                reduction=self.group_reduction,
+                reduction=self.within_attribute_reduction,
             )
 
             attribute_disparities.append(disparity)
 
         total_disparity = reduce_values(
             values=attribute_disparities,
-            reduction=self.attribute_reduction,
+            reduction=self.across_attribute_reduction,
         )
 
         return total_disparity.item()
@@ -72,14 +77,18 @@ class EqualityOpportunityMetric(Metric):
     def __init__(
         self,
         sensitive_indices=None,
-        group_reduction="max",
-        attribute_reduction="max",
+        within_attribute_reduction="max",
+        across_attribute_reduction="max",
         positive_label=1,
         name=None,
     ):
         self.sensitive_indices = sensitive_indices
-        self.group_reduction = group_reduction
-        self.attribute_reduction = attribute_reduction
+        self.within_attribute_reduction = (
+            within_attribute_reduction
+        )
+        self.across_attribute_reduction = (
+            across_attribute_reduction
+        )
         self.positive_label = positive_label
 
         if name is not None:
@@ -87,7 +96,7 @@ class EqualityOpportunityMetric(Metric):
         elif sensitive_indices is not None and len(sensitive_indices) == 1:
             self.name = f"deo_attribute_{sensitive_indices[0]}"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None, logits=None):
         y_true = torch.as_tensor(y_true).view(-1)
         y_pred = torch.as_tensor(y_pred).view(-1)
 
@@ -123,14 +132,14 @@ class EqualityOpportunityMetric(Metric):
 
                 disparity = reduce_group_rates(
                     group_rates=group_rates,
-                    reduction=self.group_reduction,
+                    reduction=self.within_attribute_reduction,
                 )
 
             attribute_disparities.append(disparity)
 
         total_disparity = reduce_values(
             values=attribute_disparities,
-            reduction=self.attribute_reduction,
+            reduction=self.across_attribute_reduction,
         )
 
         return total_disparity.item()

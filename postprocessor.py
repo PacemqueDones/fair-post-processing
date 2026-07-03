@@ -54,11 +54,7 @@ class FairPostProcessor:
         loss_dict = {}
 
         for objective in self.objectives:
-            objective_losses, objective_names = objective(
-                logits,
-                y_true,
-                sensitive_attr,
-            )
+            objective_losses, objective_names = objective(logits,y_true,sensitive_attr)
 
             if len(objective_losses) != len(objective_names):
                 raise ValueError(
@@ -67,10 +63,7 @@ class FairPostProcessor:
                     f"{len(objective_names)} names."
                 )
 
-            for loss_name, loss in zip(
-                objective_names,
-                objective_losses,
-            ):
+            for loss_name, loss in zip(objective_names,objective_losses):
                 if loss.ndim != 0:
                     raise ValueError(
                         f"Loss '{loss_name}' must be a scalar tensor, "
@@ -98,20 +91,32 @@ class FairPostProcessor:
         return [p for p in self.model.parameters() if p.requires_grad]
 
 
-    def fit(self, probs, y_true, sensitive_attr):
+    def fit(
+        self,
+        train_probs,
+        train_y_true,
+        train_sensitive_attr,
+        val_probs,
+        val_y_true,
+        val_sensitive_attr,
+        ):
         optimizer = torch.optim.SGD(self.model.parameters(), lr=self.lr)
 
-        probs = torch.tensor(probs, dtype=torch.float32)
-        y_true = torch.tensor(y_true, dtype=torch.long)
-        sensitive_attr = torch.tensor(sensitive_attr, dtype=torch.long)
+        train_probs = torch.tensor(train_probs, dtype=torch.float32)
+        train_y_true = torch.tensor(train_y_true, dtype=torch.long)
+        train_sensitive_attr = torch.tensor(train_sensitive_attr, dtype=torch.long)
+
+        val_probs = torch.tensor(val_probs, dtype=torch.float32)
+        val_y_true = torch.tensor(val_y_true, dtype=torch.long)
+        val_sensitive_attr = torch.tensor(val_sensitive_attr, dtype=torch.long)
 
         for epoch in range(self.epochs):
-            logits = self.model(probs, sensitive_attr)
+            train_logits = self.model(train_probs, train_sensitive_attr)
 
             loss_vector, loss_dict = self._compute_losses(
-                logits,
-                y_true,
-                sensitive_attr,
+                train_logits,
+                train_y_true,
+                train_sensitive_attr,
             )
 
             params = self._get_trainable_params()
@@ -124,21 +129,25 @@ class FairPostProcessor:
             optimizer.step()
 
             with torch.no_grad():
-                logits_eval = self.model(probs, sensitive_attr,)
+                val_logits = self.model(val_probs, val_sensitive_attr)
 
-                _, loss_dict_eval = self._compute_losses(logits_eval, y_true, sensitive_attr,)
+                _, val_loss_dict = self._compute_losses(
+                    val_logits,
+                    val_y_true,
+                    val_sensitive_attr,
+                )
 
-                y_pred = torch.argmax( logits_eval, dim=1, )
+                val_y_pred = torch.argmax(val_logits, dim=1)
 
                 metric_dict = {}
                 point = []
 
                 for metric in self.selection_metrics:
                     value = metric(
-                        y_true=y_true,
-                        y_pred=y_pred,
-                        sensitive_attr=sensitive_attr,
-                        scores=logits_eval,
+                        y_true=val_y_true,
+                        y_pred=val_y_pred,
+                        sensitive_attr=val_sensitive_attr,
+                        logits=val_logits,
                     )
 
                     metric_dict[metric.name] = value
@@ -146,7 +155,7 @@ class FairPostProcessor:
 
                 epoch_record = {
                     "epoch": epoch,
-                    "losses": loss_dict_eval,
+                    "losses": val_loss_dict,
                     "metrics": metric_dict,
                     "point": point,
                     "model_state": {
@@ -190,11 +199,11 @@ class FairPostProcessor:
 
     def predict(
         self,
-        probs,
+        base_probs,
         sensitive_attr=None,
     ):
         self._check_is_fitted()
-        probs = torch.as_tensor(probs, dtype=torch.float32,
+        base_probs = torch.as_tensor(base_probs, dtype=torch.float32,
         )
 
         if sensitive_attr is not None:
@@ -203,16 +212,16 @@ class FairPostProcessor:
         with torch.no_grad():
             self.model.load_state_dict(self.best_model_state_)
 
-            logits = self.model(probs, sensitive_attr)
+            logits = self.model(base_probs, sensitive_attr)
 
             return torch.argmax(logits, dim=1).cpu().numpy()
         
     def predict_proba(
         self,
-        probs,
+        base_probs,
         sensitive_attr=None,
     ):
-        probs = torch.as_tensor(probs, dtype=torch.float32)
+        base_probs = torch.as_tensor(base_probs, dtype=torch.float32)
 
         if sensitive_attr is not None:
             sensitive_attr = torch.as_tensor(sensitive_attr,dtype=torch.long)
@@ -220,6 +229,6 @@ class FairPostProcessor:
         with torch.no_grad():
             self.model.load_state_dict(self.best_model_state_)
 
-            logits = self.model(probs,sensitive_attr)
+            logits = self.model(base_probs,sensitive_attr)
 
             return torch.softmax(logits,dim=1,).cpu().numpy()

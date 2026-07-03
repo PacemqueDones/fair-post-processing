@@ -2,12 +2,16 @@ from .threshold import (
     ThresholdRatioModel,
     ThresholdRatioSiLUModel,
     ThresholdRatioDGateModel,
-    ThresholdCategoricalAdditiveRatioModel
+    LogitAffineModel,
+    ThresholdCategoricalAdditiveRatioModel,
+    LogitCategoricalAdditiveModel
 )
 
 __all__ = [
     "ThresholdRatioModel",
     "ThresholdRatioSiLUModel",
     "ThresholdRatioDGateModel",
-    'ThresholdCategoricalAdditiveRatioModel'
+    "LogitAffineModel",
+    'ThresholdCategoricalAdditiveRatioModel',
+    'LogitCategoricalAdditiveModel'
 ]

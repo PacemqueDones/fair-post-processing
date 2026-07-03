@@ -8,7 +8,7 @@ class AccuracyMetric(Metric):
     direction = "max"
     type = "performance"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None, logits=None):
         y_true = torch.as_tensor(y_true)
         y_pred = torch.as_tensor(y_pred)
 
@@ -20,7 +20,7 @@ class BalancedAccuracyMetric(Metric):
     direction = "max"
     type = "performance"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None, logits=None):
         y_true = torch.as_tensor(y_true).view(-1)
         y_pred = torch.as_tensor(y_pred).view(-1)
 
@@ -39,7 +39,7 @@ class PrecisionMetric(Metric):
     direction = "max"
     type = "performance"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None, logits=None):
         y_true = torch.as_tensor(y_true).view(-1)
         y_pred = torch.as_tensor(y_pred).view(-1)
 
@@ -59,7 +59,7 @@ class RecallMetric(Metric):
     direction = "max"
     type = "performance"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None, logits=None):
         y_true = torch.as_tensor(y_true).view(-1)
         y_pred = torch.as_tensor(y_pred).view(-1)
 
@@ -76,7 +76,7 @@ class F1ScoreMetric(Metric):
     direction = "max"
     type = "performance"
 
-    def __call__(self, y_true, y_pred, sensitive_attr=None, scores=None):
+    def __call__(self, y_true, y_pred, sensitive_attr=None, logits=None):
         y_true = torch.as_tensor(y_true).view(-1)
         y_pred = torch.as_tensor(y_pred).view(-1)
 

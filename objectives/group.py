@@ -18,27 +18,27 @@ class _MarginalMultigroupObjective(Objective):
     }
 
     def _validate_reductions(self):
-        if self.group_reduction not in self.valid_reductions:
+        if self.within_attribute_reduction not in self.valid_reductions:
             raise ValueError(
-                "group_reduction must be 'none', 'mean', "
-                "'sum', or 'max'."
+                "within_attribute_reduction must be "
+                "'none', 'mean', 'sum', or 'max'."
             )
 
-        if self.attribute_reduction not in self.valid_reductions:
+        if self.across_attribute_reduction not in self.valid_reductions:
             raise ValueError(
-                "attribute_reduction must be 'none', "
-                "'mean', 'sum', or 'max'."
+                "across_attribute_reduction must be "
+                "'none', 'mean', 'sum', or 'max'."
             )
 
         if (
-            self.group_reduction == "none"
-            and self.attribute_reduction != "none"
+            self.within_attribute_reduction == "none"
+            and self.across_attribute_reduction != "none"
         ):
             raise ValueError(
-                "attribute_reduction must be 'none' when "
-                "group_reduction is 'none', because each "
-                "attribute returns a different number of "
-                "pairwise losses."
+                "across_attribute_reduction must be 'none' "
+                "when within_attribute_reduction is 'none', "
+                "because each sensitive attribute may return "
+                "a different number of group comparisons."
             )
 
     def _kl_bern(self, p0, p1):
@@ -102,18 +102,17 @@ class _MarginalMultigroupObjective(Objective):
             zero = logits.sum() * 0.0
             return [zero], [f"{attribute_name}_insufficient_groups"]
 
-        # For absolute differences between scalar means:
-        # max_{a,b} |mu_a - mu_b| = max(mu) - min(mu).
-        # This avoids constructing O(K^2) pairs.
         if (
             self.relaxation == "mean"
-            and self.group_reduction == "max"
+            and self.within_attribute_reduction == "max"
         ):
             means_tensor = torch.stack(means)
+
             disparity = (
                 means_tensor.max()
                 - means_tensor.min()
             )
+
             return [disparity], [f"{attribute_name}_max"]
 
         pair_losses = []
@@ -133,6 +132,7 @@ class _MarginalMultigroupObjective(Objective):
                         means[right_index],
                     )
                 )
+
                 pair_names.append(
                     f"{attribute_name}_group_"
                     f"{left_group}_vs_{right_group}"
@@ -141,7 +141,7 @@ class _MarginalMultigroupObjective(Objective):
         return reduce_losses(
             losses=pair_losses,
             names=pair_names,
-            reduction=self.group_reduction,
+            reduction=self.within_attribute_reduction,
             reduced_name=attribute_name,
         )
 
@@ -164,7 +164,7 @@ class _MarginalMultigroupObjective(Objective):
         return reduce_losses(
             losses=losses,
             names=names,
-            reduction=self.attribute_reduction,
+            reduction=self.across_attribute_reduction,
             reduced_name=self.name,
         )
 
@@ -178,8 +178,8 @@ class DemographicParityObjective(_MarginalMultigroupObjective):
         ce_weight=0.0,
         relaxation="mean",
         sensitive_indices=None,
-        group_reduction="max",
-        attribute_reduction='none',
+        within_attribute_reduction="max",
+        across_attribute_reduction="none",
         eps=1e-7,
     ):
         valid_relaxations = {"mean", "kl"}
@@ -193,8 +193,8 @@ class DemographicParityObjective(_MarginalMultigroupObjective):
         self.ce_weight = ce_weight
         self.relaxation = relaxation
         self.sensitive_indices = sensitive_indices
-        self.group_reduction = group_reduction
-        self.attribute_reduction = attribute_reduction
+        self.within_attribute_reduction = (within_attribute_reduction)
+        self.across_attribute_reduction = (across_attribute_reduction)
         self.eps = eps
         self.name = f"demographic_parity_{relaxation}"
 
@@ -264,8 +264,8 @@ class EqualityOpportunityObjective(_MarginalMultigroupObjective):
         ce_weight=0.0,
         relaxation="mean",
         sensitive_indices=None,
-        group_reduction="max",
-        attribute_reduction="none",
+        within_attribute_reduction="max",
+        across_attribute_reduction="none",
         positive_label=1,
         eps=1e-7,
     ):
@@ -281,8 +281,8 @@ class EqualityOpportunityObjective(_MarginalMultigroupObjective):
         self.ce_weight = ce_weight
         self.relaxation = relaxation
         self.sensitive_indices = sensitive_indices
-        self.group_reduction = group_reduction
-        self.attribute_reduction = attribute_reduction
+        self.within_attribute_reduction = (within_attribute_reduction)
+        self.across_attribute_reduction = (across_attribute_reduction)
         self.positive_label = positive_label
         self.eps = eps
         self.name = f"equality_opportunity_{relaxation}"

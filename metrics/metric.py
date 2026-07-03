@@ -12,7 +12,7 @@ class Metric(ABC):
         y_true,
         y_pred,
         sensitive_attr=None,
-        scores=None,
+        logits=None,
     ) -> float:
         """Calcula e devolve um único valor escalar."""
         pass

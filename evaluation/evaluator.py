@@ -10,17 +10,17 @@ def calculate_metrics(
 
     y_true = torch.as_tensor(y_true).view(-1)
     y_pred = torch.as_tensor(y_pred).view(-1)
-    sensitive_features = torch.as_tensor(sensitive_features)
+    sensitive_attr = torch.as_tensor(sensitive_features)
 
-    if sensitive_features.ndim == 1:
-        sensitive_features = sensitive_features.reshape(-1, 1)
+    if sensitive_attr.ndim == 1:
+        sensitive_attr = sensitive_attr.reshape(-1, 1)
 
     for metric in metrics:
         value = metric(
             y_true=y_true,
             y_pred=y_pred,
-            sensitive_attr=sensitive_features,
-            scores=None,
+            sensitive_attr=sensitive_attr,
+            logits=None,
         )
 
         results[metric.name] = float(round(value, 4))
