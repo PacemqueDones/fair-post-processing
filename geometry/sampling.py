@@ -14,15 +14,24 @@ class PairSampler:
 
     def __init__(
         self,
-        max_pairs=2_000_000,
+        max_pairs=None,
         random_state=31,
     ):
-        if max_pairs < 1:
+        if (
+            max_pairs is not None
+            and max_pairs < 1
+        ):
             raise ValueError(
-                "max_pairs deve ser maior ou igual a 1."
+                "max_pairs deve ser None ou "
+                "um inteiro maior ou igual a 1."
             )
 
-        self.max_pairs = int(max_pairs)
+        self.max_pairs = (
+            None
+            if max_pairs is None
+            else int(max_pairs)
+        )
+
         self.random_state = random_state
 
     @staticmethod
@@ -150,16 +159,18 @@ class PairSampler:
             num_samples
         )
 
-        num_pairs = min(
-            total_pairs,
-            self.max_pairs,
-        )
+        if self.max_pairs is None:
+            num_pairs = total_pairs
+        else:
+            num_pairs = min(
+                total_pairs,
+                self.max_pairs,
+            )
 
         if num_pairs == total_pairs:
             pair_index = self._all_pairs(
                 num_samples
             )
-
         else:
             seed = (
                 self.random_state
