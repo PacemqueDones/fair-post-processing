@@ -109,3 +109,85 @@ class IndividualFairnessViolationRateMetric(Metric):
             total_pairs += (end - start) * (num_samples - 1)
 
         return (total_violations / total_pairs).item()
+    
+
+class ConsistencyScoreMetric(Metric):
+    name = "consistency"
+    direction = "max"
+    type = "individual_fairness"
+
+    def __init__(
+        self,
+        neighbor_indices,
+    ):
+        neighbor_indices = torch.as_tensor(neighbor_indices)
+
+        if neighbor_indices.ndim != 2:
+            raise ValueError(
+                "neighbor_indices deve ter shape "
+                "(n_samples, n_neighbors)."
+            )
+
+        if torch.is_floating_point(neighbor_indices):
+            raise ValueError(
+                "ConsistencyScoreMetric agora espera uma matriz "
+                "pre-processada de indices de vizinhos, nao X."
+            )
+
+        self.neighbor_indices = neighbor_indices.to(dtype=torch.long)
+
+    def __call__(
+        self,
+        y_true,
+        y_pred,
+        sensitive_attr=None,
+        logits=None,
+    ):
+        if logits is None:
+            raise ValueError(
+                "Consistency Score precisa receber logits."
+            )
+
+        probabilities = torch.softmax(logits, dim=1)
+
+        neighbor_indices = self.neighbor_indices.to(
+            probabilities.device
+        )
+
+        num_samples = probabilities.shape[0]
+
+        if neighbor_indices.shape[0] != num_samples:
+            raise ValueError(
+                "O número de amostras usado para construir "
+                "os vizinhos deve ser igual ao número de logits."
+            )
+
+        if neighbor_indices.min() < 0 or neighbor_indices.max() >= num_samples:
+            raise ValueError(
+                "neighbor_indices contem indices fora do intervalo "
+                "dos logits recebidos."
+            )
+
+        neighbor_probabilities = probabilities[
+            neighbor_indices
+        ]
+
+        mean_neighbor_probabilities = (
+            neighbor_probabilities.mean(dim=1)
+        )
+
+        individual_inconsistency = (
+            0.5
+            * torch.abs(
+                probabilities
+                - mean_neighbor_probabilities
+            ).sum(dim=1)
+        )
+
+        mean_inconsistency = (
+            individual_inconsistency.mean()
+        )
+
+        consistency = 1.0 - mean_inconsistency
+
+        return consistency.item()

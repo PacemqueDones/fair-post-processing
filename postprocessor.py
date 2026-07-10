@@ -16,9 +16,11 @@ class FairPostProcessor:
         aggregator: str = "upgrad",
         lr: float = 1e-2,
         epochs: int = 100,
+        device=None,
     ):
 
-        self.model = model
+        self.device = self._resolve_device(device, model)
+        self.model = model.to(self.device)
         self.objectives = objectives
         self.selector = selector
         self.selection_metrics = selection_metrics or []
@@ -43,6 +45,28 @@ class FairPostProcessor:
         # Metadados das métricas usadas na seleção
         self.metric_names_ = None
         self.metric_directions_ = None
+
+    def _resolve_device(self, device, model):
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        if device is None:
+            try:
+                return next(model.parameters()).device
+            except StopIteration:
+                return torch.device("cpu")
+
+        resolved_device = torch.device(device)
+
+        if resolved_device.type == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError(
+                "device='cuda' foi solicitado, mas CUDA nao esta disponivel."
+            )
+
+        return resolved_device
+
+    def _as_tensor(self, values, dtype):
+        return torch.as_tensor(values, dtype=dtype, device=self.device)
 
     def _compute_losses(
         self,
@@ -100,15 +124,16 @@ class FairPostProcessor:
         val_y_true,
         val_sensitive_attr,
         ):
+        self.model.to(self.device)
         optimizer = torch.optim.SGD(self.model.parameters(), lr=self.lr)
 
-        train_probs = torch.tensor(train_probs, dtype=torch.float32)
-        train_y_true = torch.tensor(train_y_true, dtype=torch.long)
-        train_sensitive_attr = torch.tensor(train_sensitive_attr, dtype=torch.long)
+        train_probs = self._as_tensor(train_probs, dtype=torch.float32)
+        train_y_true = self._as_tensor(train_y_true, dtype=torch.long)
+        train_sensitive_attr = self._as_tensor(train_sensitive_attr, dtype=torch.long)
 
-        val_probs = torch.tensor(val_probs, dtype=torch.float32)
-        val_y_true = torch.tensor(val_y_true, dtype=torch.long)
-        val_sensitive_attr = torch.tensor(val_sensitive_attr, dtype=torch.long)
+        val_probs = self._as_tensor(val_probs, dtype=torch.float32)
+        val_y_true = self._as_tensor(val_y_true, dtype=torch.long)
+        val_sensitive_attr = self._as_tensor(val_sensitive_attr, dtype=torch.long)
 
         for epoch in range(self.epochs):
             train_logits = self.model(train_probs, train_sensitive_attr)
@@ -131,12 +156,6 @@ class FairPostProcessor:
             with torch.no_grad():
                 val_logits = self.model(val_probs, val_sensitive_attr)
 
-                _, val_loss_dict = self._compute_losses(
-                    val_logits,
-                    val_y_true,
-                    val_sensitive_attr,
-                )
-
                 val_y_pred = torch.argmax(val_logits, dim=1)
 
                 metric_dict = {}
@@ -155,11 +174,11 @@ class FairPostProcessor:
 
                 epoch_record = {
                     "epoch": epoch,
-                    "losses": val_loss_dict,
+                    "losses": loss_dict,
                     "metrics": metric_dict,
                     "point": point,
                     "model_state": {
-                        name: tensor.detach().clone()
+                        name: tensor.detach().clone().to(self.device)
                         for name, tensor
                         in self.model.state_dict().items()
                     },
@@ -177,7 +196,10 @@ class FairPostProcessor:
         self.pareto_indices_ = front_idx
         self.pareto_front_ = [pareto_points[i] for i in front_idx]
 
-        local_idx = self.selector.select(self.pareto_front_, self.metric_directions_)
+        local_idx = self.selector.select(
+            self.pareto_front_,
+            self.selection_metrics,
+        )
         global_idx = front_idx[local_idx]
 
         best_record = self.history_[global_idx]
@@ -203,11 +225,11 @@ class FairPostProcessor:
         sensitive_attr=None,
     ):
         self._check_is_fitted()
-        base_probs = torch.as_tensor(base_probs, dtype=torch.float32,
-        )
+        self.model.to(self.device)
+        base_probs = self._as_tensor(base_probs, dtype=torch.float32)
 
         if sensitive_attr is not None:
-            sensitive_attr = torch.as_tensor(sensitive_attr, dtype=torch.long)
+            sensitive_attr = self._as_tensor(sensitive_attr, dtype=torch.long)
 
         with torch.no_grad():
             self.model.load_state_dict(self.best_model_state_)
@@ -221,10 +243,12 @@ class FairPostProcessor:
         base_probs,
         sensitive_attr=None,
     ):
-        base_probs = torch.as_tensor(base_probs, dtype=torch.float32)
+        self._check_is_fitted()
+        self.model.to(self.device)
+        base_probs = self._as_tensor(base_probs, dtype=torch.float32)
 
         if sensitive_attr is not None:
-            sensitive_attr = torch.as_tensor(sensitive_attr,dtype=torch.long)
+            sensitive_attr = self._as_tensor(sensitive_attr, dtype=torch.long)
 
         with torch.no_grad():
             self.model.load_state_dict(self.best_model_state_)

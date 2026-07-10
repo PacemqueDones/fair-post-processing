@@ -5,7 +5,9 @@ from .group import (
 from .individual import (
     IndividualFairnessViolationMeanMetric,
     IndividualFairnessViolationRateMetric,
+    ConsistencyScoreMetric,
 )
+
 from .performance import (
     AccuracyMetric,
     BalancedAccuracyMetric,
@@ -25,4 +27,5 @@ __all__ = [
     "EqualityOpportunityMetric",
     "IndividualFairnessViolationMeanMetric",
     "IndividualFairnessViolationRateMetric",
+    "ConsistencyScoreMetric",
 ]

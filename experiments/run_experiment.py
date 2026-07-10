@@ -1,4 +1,3 @@
-
 from fairpp.models import (
     ThresholdRatioModel,
     ThresholdRatioSiLUModel,
@@ -13,6 +12,7 @@ from fairpp.geometry import (
     FairLaplacianBuilder,
     FairGeometryBuilder,
 )
+
 from fairpp.objectives.performance import (
     CrossEntropyObjective,
 )
