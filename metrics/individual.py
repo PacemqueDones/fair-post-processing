@@ -191,3 +191,121 @@ class ConsistencyScoreMetric(Metric):
         consistency = 1.0 - mean_inconsistency
 
         return consistency.item()
+
+
+class SampledIndividualFairnessViolationRateMetric(
+    Metric
+):
+    name = "ifv_rate"
+    direction = "min"
+    type = "individual_fairness"
+
+    def __init__(
+        self,
+        geometry,
+        L_const=1.0,
+        pair_block_size=100_000,
+    ):
+        self.geometry = geometry
+        self.L_const = L_const
+        self.pair_block_size = (
+            pair_block_size
+        )
+
+    def __call__(
+        self,
+        y_true,
+        y_pred,
+        sensitive_attr=None,
+        logits=None,
+    ):
+        if logits is None:
+            raise ValueError(
+                "IFV rate precisa receber logits."
+            )
+
+        probabilities = torch.softmax(
+            logits,
+            dim=1,
+        )
+
+        geometry = self.geometry
+
+        if (
+            probabilities.shape[0]
+            != geometry.num_samples
+        ):
+            raise ValueError(
+                "O número de probabilidades deve "
+                "ser igual ao número de amostras "
+                "da geometria."
+            )
+
+        pair_index = (
+            geometry.pair_index.to(
+                probabilities.device
+            )
+        )
+
+        fair_distances = (
+            geometry.fair_distances.to(
+                device=probabilities.device,
+                dtype=probabilities.dtype,
+            )
+        )
+
+        total_violations = torch.tensor(
+            0.0,
+            device=probabilities.device,
+            dtype=probabilities.dtype,
+        )
+
+        num_pairs = (
+            geometry.num_stored_pairs
+        )
+
+        for start in range(
+            0,
+            num_pairs,
+            self.pair_block_size,
+        ):
+            end = min(
+                start + self.pair_block_size,
+                num_pairs,
+            )
+
+            source = pair_index[
+                0,
+                start:end,
+            ]
+
+            target = pair_index[
+                1,
+                start:end,
+            ]
+
+            prediction_distance = (
+                0.5
+                * torch.abs(
+                    probabilities[source]
+                    - probabilities[target]
+                ).sum(dim=1)
+            )
+
+            violations = (
+                prediction_distance
+                > self.L_const
+                * fair_distances[
+                    start:end
+                ]
+            )
+
+            total_violations = (
+                total_violations
+                + violations.float().sum()
+            )
+
+        return (
+            total_violations
+            / num_pairs
+        ).item()
