@@ -241,10 +241,6 @@ class ThresholdCategoricalAdditiveRatioModel(nn.Module):
         thresholds = self.get_thresholds(probs, sensitive_attr)
         ratios = probs / thresholds
         return self.alpha * ratios
-    
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 
 class LogitCategoricalAdditiveModel(nn.Module):

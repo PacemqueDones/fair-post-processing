@@ -4,7 +4,7 @@ from .threshold import (
     ThresholdRatioDGateModel,
     LogitAffineModel,
     ThresholdCategoricalAdditiveRatioModel,
-    LogitCategoricalAdditiveModel
+    LogitCategoricalAdditiveModel,
 )
 
 __all__ = [
@@ -12,6 +12,6 @@ __all__ = [
     "ThresholdRatioSiLUModel",
     "ThresholdRatioDGateModel",
     "LogitAffineModel",
-    'ThresholdCategoricalAdditiveRatioModel',
-    'LogitCategoricalAdditiveModel'
+    "ThresholdCategoricalAdditiveRatioModel",
+    "LogitCategoricalAdditiveModel",
 ]

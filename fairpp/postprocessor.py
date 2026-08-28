@@ -1,6 +1,6 @@
 import torch
 
-from .selection.pareto import pareto_front
+from .selection import pareto_front
 from .optimization import build_aggregator
 from torchjd.autojac import backward as jacobian_backward
 from torchjd.autojac import jac_to_grad
