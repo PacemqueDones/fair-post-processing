@@ -24,11 +24,10 @@ env/
 # 4. Dados, Resultados e Gráficos Gerados
 # ==========================================
 
-fairpp/experiments/results_fairpp/*/
-fairpp/experiments/results/*/
-
-fairpp/experiments/diagnose/*.png
-fairpp/experiments/fronteira-pareto.png
+experiments/results_fairpp/*/
+experiments/results/*/
+experiments/diagnose/*.png
+experiments/fronteira-pareto.png
 
 *.csv
 
