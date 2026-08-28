@@ -1,6 +1,111 @@
 import numpy as np
 import torch
 
+from scipy.spatial.distance import pdist, squareform
+
+class FairDistanceBuilder:
+    """Constrói a matriz densa de distâncias justas.
+
+    O fluxo é:
+
+        X
+        -> distâncias brutas
+        -> matriz quadrada
+        -> normalização
+        -> D_X
+    """
+
+    def __init__(
+        self,
+        metric="mahalanobis",
+        normalization="fraction",
+        theta=1.0,
+        fraction_scale=1.0,
+        eps=1e-8,
+        dtype=torch.float32,
+    ):
+        valid_metrics = {"mahalanobis", "euclidean", "manhattan"}
+
+        valid_normalizations = {"none", "minmax", "exp", "fraction"}
+
+        if metric not in valid_metrics:
+            raise ValueError(
+                "metric deve ser 'mahalanobis', "
+                "'euclidean' ou 'manhattan'."
+            )
+
+        if normalization not in valid_normalizations:
+            raise ValueError(
+                "normalization deve ser 'none', "
+                "'minmax', 'exp' ou 'fraction'."
+            )
+
+        self.metric = metric
+        self.normalization = normalization
+        self.theta = theta
+        self.fraction_scale = fraction_scale
+        self.eps = eps
+        self.dtype = dtype
+
+    def _to_numpy(self, X):
+        if isinstance(X, torch.Tensor):
+            return X.detach().cpu().numpy()
+
+        if hasattr(X, "to_numpy"):
+            return X.to_numpy()
+
+        return np.asarray(X)
+
+    def _distance_vector(self, X):
+        X = self._to_numpy(X).astype(np.float64)
+
+        if X.ndim != 2:
+            raise ValueError(
+                "X deve possuir shape "
+                "(n_samples, n_features)."
+            )
+
+        if self.metric == "mahalanobis":
+            covariance = np.cov(X, rowvar=False)
+
+            covariance = covariance + self.eps * np.eye(covariance.shape[0])
+
+            inverse_covariance = np.linalg.pinv(covariance)
+
+            return pdist(X, metric="mahalanobis", VI=inverse_covariance)
+
+        if self.metric == "euclidean":
+            return pdist(X, metric="euclidean")
+
+        return pdist(X, metric="cityblock")
+
+    def _normalize(self, distances):
+        if self.normalization == "none":
+            return distances.copy()
+
+        if self.normalization == "minmax":
+            return distances / (distances.max() + self.eps)
+
+        if self.normalization == "exp":
+            return 1.0 - np.exp(
+                -self.theta * distances**2
+            )
+
+        return distances / (
+            self.fraction_scale + distances
+    )
+
+    def build(self, X):
+        """Retorna as distâncias brutas e normalizadas como vetores."""
+
+        D_vector = self._distance_vector(X)
+        N_vector = self._normalize(D_vector)
+
+        return (
+            torch.as_tensor(D_vector, dtype=self.dtype),
+            torch.as_tensor(N_vector, dtype=self.dtype),
+        )
+
 
 class FairDistanceMetric:
     """Calcula distâncias somente para pares fornecidos.
@@ -23,18 +128,9 @@ class FairDistanceMetric:
         block_size=100_000,
         dtype=torch.float32,
     ):
-        valid_metrics = {
-            "mahalanobis",
-            "euclidean",
-            "manhattan",
-        }
+        valid_metrics = {"mahalanobis", "euclidean", "manhattan"}
 
-        valid_normalizations = {
-            "none",
-            "minmax",
-            "exp",
-            "fraction",
-        }
+        valid_normalizations = {"none", "minmax", "exp", "fraction"}
 
         if metric not in valid_metrics:
             raise ValueError(
@@ -63,11 +159,7 @@ class FairDistanceMetric:
 
     def _to_numpy(self, X):
         if isinstance(X, torch.Tensor):
-            return (
-                X.detach()
-                .cpu()
-                .numpy()
-            )
+            return X.detach().cpu().numpy()
 
         if hasattr(X, "to_numpy"):
             return X.to_numpy()
@@ -79,10 +171,7 @@ class FairDistanceMetric:
 
         X = self._to_numpy(X)
 
-        X = np.asarray(
-            X,
-            dtype=np.float64,
-        )
+        X = np.asarray(X, dtype=np.float64)
 
         if X.ndim != 2:
             raise ValueError(
@@ -91,34 +180,17 @@ class FairDistanceMetric:
             )
 
         if self.metric == "mahalanobis":
-            covariance = np.cov(
-                X,
-                rowvar=False,
-            )
+            covariance = np.cov(X, rowvar=False)
 
-            covariance = (
-                covariance
-                + self.eps
-                * np.eye(
-                    covariance.shape[0]
-                )
-            )
+            covariance = covariance + self.eps * np.eye(covariance.shape[0])
 
-            self.inverse_covariance_ = (
-                np.linalg.pinv(
-                    covariance
-                )
-            )
+            self.inverse_covariance_ = np.linalg.pinv(covariance)
 
         self.is_fitted_ = True
 
         return self
 
-    def compute_pairs(
-        self,
-        X,
-        pair_index,
-    ):
+    def compute_pairs(self, X, pair_index):
         """Calcula as distâncias brutas dos pares."""
 
         if not self.is_fitted_:
@@ -129,27 +201,13 @@ class FairDistanceMetric:
 
         X = self._to_numpy(X)
 
-        X = np.asarray(
-            X,
-            dtype=np.float64,
-        )
+        X = np.asarray(X, dtype=np.float64)
 
-        pair_index = torch.as_tensor(
-            pair_index,
-            dtype=torch.long,
-        )
+        pair_index = torch.as_tensor(pair_index, dtype=torch.long)
 
-        pair_index = (
-            pair_index
-            .detach()
-            .cpu()
-            .numpy()
-        )
+        pair_index = pair_index.detach().cpu().numpy()
 
-        if (
-            pair_index.ndim != 2
-            or pair_index.shape[0] != 2
-        ):
+        if pair_index.ndim != 2 or pair_index.shape[0] != 2:
             raise ValueError(
                 "pair_index deve possuir shape "
                 "(2, num_pairs)."
@@ -157,35 +215,16 @@ class FairDistanceMetric:
 
         num_pairs = pair_index.shape[1]
 
-        distances = np.empty(
-            num_pairs,
-            dtype=np.float64,
-        )
+        distances = np.empty(num_pairs, dtype=np.float64)
 
-        for start in range(
-            0,
-            num_pairs,
-            self.block_size,
-        ):
-            end = min(
-                start + self.block_size,
-                num_pairs,
-            )
+        for start in range(0, num_pairs, self.block_size):
+            end = min(start + self.block_size, num_pairs)
 
-            source = pair_index[
-                0,
-                start:end,
-            ]
+            source = pair_index[0, start:end]
 
-            target = pair_index[
-                1,
-                start:end,
-            ]
+            target = pair_index[1, start:end]
 
-            differences = (
-                X[source]
-                - X[target]
-            )
+            differences = X[source] - X[target]
 
             if self.metric == "euclidean":
                 block_distances = np.sqrt(

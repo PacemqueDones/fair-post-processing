@@ -1,7 +1,7 @@
-from .geometry import FairPairGeometry
+from .geometry import FairPairGeometry, FairGeometry
 
 
-class FairGeometryBuilder:
+class SampledFairGeometryBuilder:
     """Coordena amostragem, distâncias e pesos."""
 
     def __init__(
@@ -45,21 +45,28 @@ class FairGeometryBuilder:
             self.pair_sampler.max_pairs
         )
 
-        self.pair_sampler.max_pairs = min(
-            original_max_pairs,
-            self.tau_max_pairs,
-        )
+        try:
+            if original_max_pairs is None:
+                self.pair_sampler.max_pairs = (
+                    self.tau_max_pairs
+                )
+            else:
+                self.pair_sampler.max_pairs = min(
+                    original_max_pairs,
+                    self.tau_max_pairs,
+                )
 
-        tau_pair_index = (
-            self.pair_sampler.sample(
-                num_samples=num_samples,
-                random_state=self.tau_random_state,
+            tau_pair_index = (
+                self.pair_sampler.sample(
+                    num_samples=num_samples,
+                    random_state=self.tau_random_state,
+                )
             )
-        )
 
-        self.pair_sampler.max_pairs = (
-            original_max_pairs
-        )
+        finally:
+            self.pair_sampler.max_pairs = (
+                original_max_pairs
+            )
 
         tau_raw_distances = (
             self.distance_metric.compute_pairs(
@@ -94,7 +101,7 @@ class FairGeometryBuilder:
 
         if not self.is_fitted_:
             raise RuntimeError(
-                "FairGeometryBuilder precisa "
+                "SampledFairGeometryBuilder precisa "
                 "ser ajustado com fit(X_train)."
             )
 
@@ -169,3 +176,29 @@ class FairGeometryBuilder:
                 == num_total_pairs
             ),
         )
+    
+class FairGeometryBuilder:
+    """Constrói toda a geometria densa.
+
+    Calcula:
+
+        D_X para IFV
+
+        W e L para a regularização Laplaciana
+    """
+
+    def __init__(
+        self,
+        distance_builder,
+        laplacian_builder,
+    ):
+        self.distance_builder = distance_builder
+
+        self.laplacian_builder = laplacian_builder
+
+    def build(self, X):
+        D_vector, N_vector = self.distance_builder.build(X)
+
+        W_vector, L = self.laplacian_builder.build(D_vector)
+
+        return FairGeometry(N_vector=N_vector, W_vector=W_vector, L=L)

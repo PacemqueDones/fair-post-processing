@@ -52,3 +52,11 @@ class FairPairGeometry:
 
     edge_weights: torch.Tensor | None = None
     tau: float | None = None
+
+@dataclass
+class FairGeometry:
+    """Agrupa os objetos geométricos usados no experimento."""
+
+    N_vector: torch.Tensor
+    W_vector: torch.Tensor
+    L: torch.Tensor

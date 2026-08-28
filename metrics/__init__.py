@@ -1,12 +1,4 @@
-from .group import (
-    DemographicParityMetric,
-    EqualityOpportunityMetric,
-)
-from .individual import (
-    IndividualFairnessViolationMeanMetric,
-    IndividualFairnessViolationRateMetric,
-    ConsistencyScoreMetric,
-)
+from .metric import Metric
 
 from .performance import (
     AccuracyMetric,
@@ -16,8 +8,21 @@ from .performance import (
     F1ScoreMetric,
 )
 
+from .group import (
+    DemographicParityMetric,
+    EqualityOpportunityMetric,
+)
+
+from .individual import (
+    IndividualFairnessViolationMeanMetric,
+    IndividualFairnessViolationRateMetric,
+    SampledIndividualFairnessViolationRateMetric,
+    ConsistencyScoreMetric,
+)
+
 
 __all__ = [
+    "Metric",
     "AccuracyMetric",
     "BalancedAccuracyMetric",
     "PrecisionMetric",
@@ -27,5 +32,6 @@ __all__ = [
     "EqualityOpportunityMetric",
     "IndividualFairnessViolationMeanMetric",
     "IndividualFairnessViolationRateMetric",
+    "SampledIndividualFairnessViolationRateMetric",
     "ConsistencyScoreMetric",
 ]
