@@ -23,20 +23,26 @@ env/
 # ==========================================
 # 4. Dados, Resultados e Gráficos Gerados
 # ==========================================
-# Ignora as pastas temporárias com datas dentro de results_fairpp
-experiments/results_fairpp/*/
-experiments/results/*/
 
-# Ignora imagens geradas nos diagnósticos (opcional, mas recomendado)
-experiments/diagnose/*.png
-experiments/fronteira-pareto.png
+fairpp/experiments/results_fairpp/*/
+fairpp/experiments/results/*/
 
-# Se quiser ignorar TODOS os arquivos .csv gerados automaticamente
+fairpp/experiments/diagnose/*.png
+fairpp/experiments/fronteira-pareto.png
+
 *.csv
 
 # ==========================================
-# 5. Notebooks (Opcional)
+# 5. Notebooks
 # ==========================================
-# Se os arquivos .ipynb salvarem checkpoints pesados
+
 .ipynb_checkpoints/
-.ipynb
+*.ipynb
+
+# ==========================================
+# 6. Arquivos gerados pelo empacotamento
+# ==========================================
+
+*.egg-info/
+build/
+dist/
