@@ -1,17 +1,16 @@
 from .threshold import (
-    ThresholdRatioModel,
-    ThresholdRatioSiLUModel,
-    ThresholdRatioDGateModel,
-    LogitAffineModel,
+    AffineModel,
+    CategoricalAdditiveModel,
+    CovariateAffineModel,
+)
+
+from .deprecated.threshold_legacy import (
     ThresholdCategoricalAdditiveRatioModel,
-    LogitCategoricalAdditiveModel,
 )
 
 __all__ = [
-    "ThresholdRatioModel",
-    "ThresholdRatioSiLUModel",
-    "ThresholdRatioDGateModel",
-    "LogitAffineModel",
+    "AffineModel",
+    "CategoricalAdditiveModel",
+    "CovariateAffineModel",
     "ThresholdCategoricalAdditiveRatioModel",
-    "LogitCategoricalAdditiveModel",
 ]

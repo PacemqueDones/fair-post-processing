@@ -68,6 +68,76 @@ class FairPostProcessor:
     def _as_tensor(self, values, dtype):
         return torch.as_tensor(values, dtype=dtype, device=self.device)
 
+    def _as_optional_tensor(self, values, dtype):
+        if values is None:
+            return None
+
+        return self._as_tensor(values, dtype=dtype)
+
+    def _validate_dataset(
+        self,
+        inputs,
+        y_true,
+        sensitive_attr,
+        X,
+        dataset_name,
+    ):
+        if inputs.ndim != 2:
+            raise ValueError(
+                f"{dataset_name}_inputs deve possuir shape "
+                "(num_samples, num_classes)."
+            )
+
+        num_samples = inputs.shape[0]
+
+        if y_true.ndim != 1:
+            raise ValueError(
+                f"{dataset_name}_y_true deve ser unidimensional."
+            )
+
+        if y_true.shape[0] != num_samples:
+            raise ValueError(
+                f"{dataset_name}_inputs e {dataset_name}_y_true "
+                "devem possuir o mesmo número de amostras."
+            )
+
+        if not torch.isfinite(inputs).all():
+            raise ValueError(
+                f"{dataset_name}_inputs não pode conter NaN ou infinito."
+            )
+
+        if sensitive_attr is not None:
+            if sensitive_attr.ndim not in {1, 2}:
+                raise ValueError(
+                    f"{dataset_name}_sensitive_attr deve possuir "
+                    "uma ou duas dimensões."
+                )
+
+            if sensitive_attr.shape[0] != num_samples:
+                raise ValueError(
+                    f"{dataset_name}_inputs e "
+                    f"{dataset_name}_sensitive_attr devem possuir "
+                    "o mesmo número de amostras."
+                )
+
+        if X is not None:
+            if X.ndim != 2:
+                raise ValueError(
+                    f"{dataset_name}_X deve possuir shape "
+                    "(num_samples, num_features)."
+                )
+
+            if X.shape[0] != num_samples:
+                raise ValueError(
+                    f"{dataset_name}_inputs e {dataset_name}_X "
+                    "devem possuir o mesmo número de amostras."
+                )
+
+            if not torch.isfinite(X).all():
+                raise ValueError(
+                    f"{dataset_name}_X não pode conter NaN ou infinito."
+                )
+
     def _compute_losses(
         self,
         logits,
@@ -117,26 +187,26 @@ class FairPostProcessor:
 
     def fit(
         self,
-        train_probs,
+        train_inputs,
         train_y_true,
         train_sensitive_attr,
-        val_probs,
+        val_inputs,
         val_y_true,
         val_sensitive_attr,
         ):
         self.model.to(self.device)
         optimizer = torch.optim.SGD(self.model.parameters(), lr=self.lr)
 
-        train_probs = self._as_tensor(train_probs, dtype=torch.float32)
+        train_inputs = self._as_tensor(train_inputs, dtype=torch.float32)
         train_y_true = self._as_tensor(train_y_true, dtype=torch.long)
         train_sensitive_attr = self._as_tensor(train_sensitive_attr, dtype=torch.long)
 
-        val_probs = self._as_tensor(val_probs, dtype=torch.float32)
+        val_inputs = self._as_tensor(val_inputs, dtype=torch.float32)
         val_y_true = self._as_tensor(val_y_true, dtype=torch.long)
         val_sensitive_attr = self._as_tensor(val_sensitive_attr, dtype=torch.long)
 
         for epoch in range(self.epochs):
-            train_logits = self.model(train_probs, train_sensitive_attr)
+            train_logits = self.model(train_inputs, train_sensitive_attr)
 
             loss_vector, loss_dict = self._compute_losses(
                 train_logits,
@@ -154,7 +224,7 @@ class FairPostProcessor:
             optimizer.step()
 
             with torch.no_grad():
-                val_logits = self.model(val_probs, val_sensitive_attr)
+                val_logits = self.model(val_inputs, val_sensitive_attr)
 
                 val_y_pred = torch.argmax(val_logits, dim=1)
 
@@ -221,12 +291,12 @@ class FairPostProcessor:
 
     def predict(
         self,
-        base_probs,
+        inputs,
         sensitive_attr=None,
     ):
         self._check_is_fitted()
         self.model.to(self.device)
-        base_probs = self._as_tensor(base_probs, dtype=torch.float32)
+        inputs = self._as_tensor(inputs, dtype=torch.float32)
 
         if sensitive_attr is not None:
             sensitive_attr = self._as_tensor(sensitive_attr, dtype=torch.long)
@@ -234,18 +304,18 @@ class FairPostProcessor:
         with torch.no_grad():
             self.model.load_state_dict(self.best_model_state_)
 
-            logits = self.model(base_probs, sensitive_attr)
+            logits = self.model(inputs, sensitive_attr)
 
             return torch.argmax(logits, dim=1).cpu().numpy()
         
     def predict_proba(
         self,
-        base_probs,
+        inputs,
         sensitive_attr=None,
     ):
         self._check_is_fitted()
         self.model.to(self.device)
-        base_probs = self._as_tensor(base_probs, dtype=torch.float32)
+        inputs = self._as_tensor(inputs, dtype=torch.float32)
 
         if sensitive_attr is not None:
             sensitive_attr = self._as_tensor(sensitive_attr, dtype=torch.long)
@@ -253,6 +323,6 @@ class FairPostProcessor:
         with torch.no_grad():
             self.model.load_state_dict(self.best_model_state_)
 
-            logits = self.model(base_probs,sensitive_attr)
+            logits = self.model(inputs,sensitive_attr)
 
             return torch.softmax(logits,dim=1,).cpu().numpy()
