@@ -52,7 +52,9 @@ class AffineModel(nn.Module):
 
         self.input_type = input_type
 
-        self.log_scale = nn.Parameter(torch.zeros(num_classes))
+        initial_log_scale = torch.log(torch.expm1(torch.tensor(1.0))).item()
+
+        self.log_scale = nn.Parameter(torch.full((num_classes,), initial_log_scale))
         self.bias = nn.Parameter(torch.zeros(num_classes))
 
         self.alpha = alpha
