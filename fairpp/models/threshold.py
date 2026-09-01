@@ -299,6 +299,7 @@ class CovariateAffineModel(nn.Module):
         self,
         num_classes,
         num_features,
+        alpha=1.0,
         eps=1e-8,
         input_type="probability",
     ):
@@ -447,4 +448,6 @@ class CovariateAffineModel(nn.Module):
             self.eps,
         )
 
-        return scale * base_logits + bias
+        adjusted_logits = scale * base_logits + bias
+
+        return self.alpha * adjusted_logits
