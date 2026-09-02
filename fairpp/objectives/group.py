@@ -63,8 +63,13 @@ class _MarginalMultigroupObjective(Objective):
         )
 
     def _pairwise_disparity(self, left, right):
+        difference = left - right
+
         if self.relaxation == "mean":
-            return torch.abs(left - right)
+            return torch.abs(difference)
+
+        if self.relaxation == "squared_mean":
+            return difference.square()
 
         return (
             self._kl_bern(left, right)
@@ -103,7 +108,7 @@ class _MarginalMultigroupObjective(Objective):
             return [zero], [f"{attribute_name}_insufficient_groups"]
 
         if (
-            self.relaxation == "mean"
+            self.relaxation in {"mean", "squared_mean"}
             and self.within_attribute_reduction == "max"
         ):
             means_tensor = torch.stack(means)
@@ -112,6 +117,9 @@ class _MarginalMultigroupObjective(Objective):
                 means_tensor.max()
                 - means_tensor.min()
             )
+
+            if self.relaxation == "squared_mean":
+                disparity = disparity.square()
 
             return [disparity], [f"{attribute_name}_max"]
 
@@ -182,13 +190,18 @@ class DemographicParityObjective(_MarginalMultigroupObjective):
         across_attribute_reduction="none",
         eps=1e-7,
     ):
-        valid_relaxations = {"mean", "kl"}
+        valid_relaxations = {
+            "mean",
+            "squared_mean",
+            "kl",
+        }
 
         if relaxation not in valid_relaxations:
             raise ValueError(
-                "relaxation must be either 'mean' or 'kl'."
+                "relaxation must be 'mean', "
+                "'squared_mean', or 'kl'."
             )
-
+        
         self.fairness_weight = fairness_weight
         self.ce_weight = ce_weight
         self.relaxation = relaxation
@@ -269,11 +282,16 @@ class EqualityOpportunityObjective(_MarginalMultigroupObjective):
         positive_label=1,
         eps=1e-7,
     ):
-        valid_relaxations = {"mean", "kl"}
+        valid_relaxations = {
+            "mean",
+            "squared_mean",
+            "kl",
+        }
 
         if relaxation not in valid_relaxations:
             raise ValueError(
-                "relaxation must be either 'mean' or 'kl'."
+                "relaxation must be 'mean', "
+                "'squared_mean', or 'kl'."
             )
 
 

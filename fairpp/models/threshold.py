@@ -328,6 +328,7 @@ class CovariateAffineModel(nn.Module):
         if not 0 < eps < 1:
             raise ValueError("eps deve estar entre 0 e 1.")
 
+        self.alpha = alpha
         self.num_classes = num_classes
         self.num_features = num_features
         self.input_type = input_type
