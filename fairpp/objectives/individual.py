@@ -37,7 +37,14 @@ class LaplacianFairnessObjective(Objective):
         self.symmetrize = symmetrize
         self.eps = eps
 
-    def __call__(self, logits, y_true, sensitive_attr):
+    def __call__(
+        self,
+        logits,
+        y_true,
+        sensitive_attr,
+        base_outputs=None,
+        input_type=None,
+    ):
         F_scores = logits.float()
 
         if F_scores.ndim == 1:
@@ -124,6 +131,8 @@ class SampledLaplacianFairnessObjective(Objective):
         logits,
         y_true,
         sensitive_attr,
+        base_outputs=None,
+        input_type=None,
     ):
         probabilities = torch.softmax(logits.float(),dim=1,)
 

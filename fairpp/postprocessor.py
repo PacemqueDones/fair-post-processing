@@ -148,12 +148,20 @@ class FairPostProcessor:
         logits,
         y_true,
         sensitive_attr,
+        base_outputs,
+        input_type,
     ):
         losses = []
         loss_dict = {}
 
         for objective in self.objectives:
-            objective_losses, objective_names = objective(logits,y_true,sensitive_attr)
+            objective_losses, objective_names = objective(
+                logits=logits,
+                y_true=y_true,
+                sensitive_attr=sensitive_attr,
+                base_outputs=base_outputs,
+                input_type=input_type,
+            )
 
             if len(objective_losses) != len(objective_names):
                 raise ValueError(
@@ -249,6 +257,8 @@ class FairPostProcessor:
                 train_logits,
                 train_y_true,
                 train_sensitive_attr,
+                train_inputs,
+                self.model.input_type,
             )
 
             optimizer.zero_grad()

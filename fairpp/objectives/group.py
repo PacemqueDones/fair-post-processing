@@ -213,7 +213,14 @@ class DemographicParityObjective(_MarginalMultigroupObjective):
 
         self._validate_reductions()
 
-    def __call__(self, logits, y_true, sensitive_attr):
+    def __call__(
+        self,
+        logits,
+        y_true,
+        sensitive_attr,
+        base_outputs=None,
+        input_type=None,
+    ):
         sensitive_attr, sensitive_indices = (
             prepare_categorical_sensitive_attributes(
                 sensitive_attr=sensitive_attr,
@@ -307,7 +314,14 @@ class EqualityOpportunityObjective(_MarginalMultigroupObjective):
 
         self._validate_reductions()
 
-    def __call__(self, logits, y_true, sensitive_attr):
+    def __call__(
+        self,
+        logits,
+        y_true,
+        sensitive_attr,
+        base_outputs=None,
+        input_type=None,
+    ):
         sensitive_attr, sensitive_indices = (
             prepare_categorical_sensitive_attributes(
                 sensitive_attr=sensitive_attr,
@@ -391,7 +405,14 @@ class WassersteinEqualityOpportunityObjective(Objective):
             backend=backend,
         )
 
-    def __call__(self, logits, y_true, sensitive_attr):
+    def __call__(
+        self,
+        logits,
+        y_true,
+        sensitive_attr,
+        base_outputs=None,
+        input_type=None,
+    ):
         self._validate_binary_sensitive_attr(
             sensitive_attr=sensitive_attr,
             num_samples=logits.shape[0],
@@ -449,7 +470,14 @@ class WassersteinEqualityOpportunityObjective(Objective):
             backend=backend,
         )
 
-    def __call__(self, logits, y_true, sensitive_attr):
+    def __call__(
+        self,
+        logits,
+        y_true,
+        sensitive_attr,
+        base_outputs=None,
+        input_type=None,
+    ):
         preds_pos = torch.softmax(logits, dim=1)[:, 1]
 
         mask_pos = y_true == 1
@@ -492,7 +520,14 @@ class WassersteinEqualityOpportunityQuantileObjective(Objective):
         self.p = p
         self.num_quantiles = num_quantiles
 
-    def __call__(self, logits, y_true, sensitive_attr):
+    def __call__(
+        self,
+        logits,
+        y_true,
+        sensitive_attr,
+        base_outputs=None,
+        input_type=None,
+    ):
         preds_pos = torch.softmax(logits, dim=1)[:, 1]
         mask_pos = y_true == 1
 
