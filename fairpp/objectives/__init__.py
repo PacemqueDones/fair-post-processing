@@ -7,8 +7,8 @@ from .performance import (
 from .group import (
     DemographicParityObjective,
     EqualityOpportunityObjective,
+    WassersteinDemographicParityObjective,
     WassersteinEqualityOpportunityObjective,
-    WassersteinEqualityOpportunityQuantileObjective,
 )
 
 from .individual import (
@@ -22,12 +22,14 @@ __all__ = [
 
     # Performance
     "CrossEntropyObjective",
+    "KLPreservationObjective",
+    "JensenShannonPreservationObjective"
 
     # Group fairness
     "DemographicParityObjective",
     "EqualityOpportunityObjective",
+    "WassersteinDemographicParityObjective",
     "WassersteinEqualityOpportunityObjective",
-    "WassersteinEqualityOpportunityQuantileObjective",
 
     # Individual fairness
     "LaplacianFairnessObjective",
