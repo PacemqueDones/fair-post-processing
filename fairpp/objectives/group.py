@@ -785,7 +785,7 @@ class WassersteinDemographicParityObjective(Objective):
         for group_index, group_label in enumerate(group_labels):
             distances = (
                 quantiles[group_index] - barycenter
-            ).abs().pow(self.p).mean(dim=1)
+            ).abs().pow(self.p).mean(dim=1).pow(1.0 / self.p)
 
             group_name = (
                 f"{grouping_name}_group_{group_label}"
@@ -938,9 +938,7 @@ class WassersteinDemographicParityObjective(Objective):
             logits=logits,
         )
 
-class WassersteinEqualityOpportunityObjective(
-    WassersteinDemographicParityObjective
-):
+class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObjective):
     """
     Compare class-conditional group score distributions with a
     Wasserstein barycenter.
