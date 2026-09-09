@@ -236,7 +236,10 @@ class FairPostProcessor:
         self.model.to(self.device)
 
         params = self._get_trainable_params()
-        optimizer = torch.optim.SGD(params, lr=self.lr, momentum=0.9, nesterov=True,)
+        optimizer = torch.optim.SGD(
+            params, 
+            lr=self.lr
+            )
 
         train_inputs, train_y_true, train_sensitive_attr, train_X = (
             self._prepare_data(inputs=train_inputs, y_true=train_y_true, sensitive_attr=train_sensitive_attr,X=train_X)
