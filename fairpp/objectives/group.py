@@ -257,12 +257,22 @@ class _MarginalGroupFairnessObjective(Objective):
             reduced_name=self.name,
         )
 
+    def _apply_fairness_weight(
+        self,
+        losses,
+    ):
+        return [
+            self.fairness_weight * loss
+            for loss in losses
+        ]
+
 
 class DemographicParityObjective(_MarginalGroupFairnessObjective):
     name = "demographic_parity"
 
     def __init__(
         self,
+        fairness_weight=1.0,
         relaxation="abs",
         sensitive_indices=None,
         class_reduction="mean",
@@ -290,6 +300,7 @@ class DemographicParityObjective(_MarginalGroupFairnessObjective):
                 "Kullback-Leibler divergence."
             )
 
+        self.fairness_weight = fairness_weight
         self.relaxation = relaxation
         self.sensitive_indices = sensitive_indices
         self.class_reduction = class_reduction
@@ -344,10 +355,14 @@ class DemographicParityObjective(_MarginalGroupFairnessObjective):
 
             names.extend(attribute_names)
 
-        return self._reduce_attributes(
+        losses, names = self._reduce_attributes(
             losses=losses,
             names=names,
         )
+
+        losses = self._apply_fairness_weight(losses)
+
+        return losses, names
 
 
 class EqualityOpportunityObjective(_MarginalGroupFairnessObjective):
@@ -355,6 +370,7 @@ class EqualityOpportunityObjective(_MarginalGroupFairnessObjective):
 
     def __init__(
         self,
+        fairness_weight=1.0,
         relaxation="abs",
         sensitive_indices=None,
         class_reduction="mean",
@@ -383,6 +399,7 @@ class EqualityOpportunityObjective(_MarginalGroupFairnessObjective):
                 "relaxation='kl'."
             )
 
+        self.fairness_weight = fairness_weight
         self.relaxation = relaxation
         self.sensitive_indices = sensitive_indices
         self.class_reduction = class_reduction
@@ -495,11 +512,14 @@ class EqualityOpportunityObjective(_MarginalGroupFairnessObjective):
 
             names.extend(attribute_names)
 
-        return self._reduce_attributes(
+        losses, names = self._reduce_attributes(
             losses=losses,
             names=names,
         )
 
+        losses = self._apply_fairness_weight(losses)
+
+        return losses, names
 
 class WassersteinDemographicParityObjective(Objective):
     """
@@ -508,7 +528,7 @@ class WassersteinDemographicParityObjective(Objective):
     The objective is computed independently for every predicted class.
     For ``p=1``, barycenter quantiles are weighted medians. For ``p=2``,
     they are weighted means. The returned group losses approximate
-    ``W_p^p``; consequently, ``p=2`` returns squared Wasserstein losses.
+    ``W_p``; consequently, ``p=2`` returns squared Wasserstein losses.
 
     Parameters
     ----------
@@ -551,6 +571,7 @@ class WassersteinDemographicParityObjective(Objective):
 
     def __init__(
         self,
+        fairness_weight=1.0,
         p=2,
         num_quantiles=100,
         sensitive_indices=None,
@@ -579,6 +600,7 @@ class WassersteinDemographicParityObjective(Objective):
                 else None
             )
 
+        self.fairness_weight = fairness_weight
         self.p = p
         self.num_quantiles = num_quantiles
         self.sensitive_indices = sensitive_indices
@@ -906,6 +928,15 @@ class WassersteinDemographicParityObjective(Objective):
             grouping_name=grouping_name,
         )
 
+    def _apply_fairness_weight(
+        self,
+        losses,
+    ):
+        return [
+            self.fairness_weight * loss
+            for loss in losses
+        ]
+
     def __call__(
         self,
         logits,
@@ -925,19 +956,23 @@ class WassersteinDemographicParityObjective(Objective):
         probabilities = torch.softmax(logits, dim=1)
 
         if self.grouping == "marginal":
-            return self._marginal_losses(
+            losses, names = self._marginal_losses(
                 probabilities=probabilities,
                 sensitive_attr=sensitive_attr,
                 sensitive_indices=sensitive_indices,
                 logits=logits,
             )
+        else:
+            losses, names = self._intersectional_losses(
+                probabilities=probabilities,
+                sensitive_attr=sensitive_attr,
+                logits=logits,
+            )
 
-        return self._intersectional_losses(
-            probabilities=probabilities,
-            sensitive_attr=sensitive_attr,
-            logits=logits,
-        )
+        losses = self._apply_fairness_weight(losses)
 
+        return losses, names
+    
 class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObjective):
     """
     Compare class-conditional group score distributions with a
@@ -953,6 +988,7 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
 
     def __init__(
         self,
+        fairness_weight=1.0,
         p=2,
         num_quantiles=100,
         sensitive_indices=None,
@@ -962,6 +998,7 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
         attribute_reduction=_UNSET,
     ):
         super().__init__(
+            fairness_weight=fairness_weight,
             p=p,
             num_quantiles=num_quantiles,
             sensitive_indices=sensitive_indices,
@@ -1024,7 +1061,7 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
                 group_code = int(group.item())
                 distance = (
                     quantiles[local_group_index] - barycenter
-                ).abs().pow(self.p).mean()
+                ).abs().pow(self.p).mean().pow(1.0 / self.p)
 
                 group_name = (
                     f"{grouping_name}_group_"
@@ -1163,17 +1200,21 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
         probabilities = torch.softmax(logits, dim=1)
 
         if self.grouping == "marginal":
-            return self._marginal_conditional_losses(
+            losses, names = self._marginal_conditional_losses(
                 probabilities=probabilities,
                 y_true=y_true,
                 sensitive_attr=sensitive_attr,
                 sensitive_indices=sensitive_indices,
                 logits=logits,
             )
+        else:
+            losses, names = self._intersectional_conditional_losses(
+                probabilities=probabilities,
+                y_true=y_true,
+                sensitive_attr=sensitive_attr,
+                logits=logits,
+            )
 
-        return self._intersectional_conditional_losses(
-            probabilities=probabilities,
-            y_true=y_true,
-            sensitive_attr=sensitive_attr,
-            logits=logits,
-        )
+        losses = self._apply_fairness_weight(losses)
+
+        return losses, names
