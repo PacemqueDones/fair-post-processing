@@ -128,7 +128,7 @@ class FairLaplacianBuilder:
 
         L = self._build_laplacian(self.W_vector)
 
-        return self.W_vector, torch.as_tensor(L, dtype=self.dtype)
+        return torch.as_tensor(self.W_vector, dtype=self.dtype), torch.as_tensor(L, dtype=self.dtype)
 
 
 class LaplacianWeightBuilder:
