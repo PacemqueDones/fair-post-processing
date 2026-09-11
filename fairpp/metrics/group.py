@@ -312,3 +312,141 @@ class IntersectionalDemographicParityMetric(Metric):
         )
 
         return total_disparity.item()
+
+
+class IntersectionalEqualityOpportunityMetric(Metric):
+    """
+    Equality of opportunity across intersectional sensitive groups.
+
+    Each distinct combination of sensitive attributes defines one
+    intersectional group.
+
+    For each class, the true positive rate is calculated separately
+    for every intersectional group, and the disparity between these
+    rates is measured.
+    """
+
+    name = "intersectional_deo"
+    direction = "min"
+    type = "fairness"
+
+    def __init__(
+        self,
+        sensitive_indices=None,
+        class_reduction="mean",
+        group_reduction="max",
+        name=None,
+    ):
+        self.sensitive_indices = sensitive_indices
+        self.class_reduction = class_reduction
+        self.group_reduction = group_reduction
+
+        if name is not None:
+            self.name = name
+
+    def __call__(
+        self,
+        y_true,
+        y_pred,
+        sensitive_attr=None,
+        logits=None,
+    ):
+        y_true = torch.as_tensor(y_true).view(-1)
+        y_pred = torch.as_tensor(y_pred).view(-1)
+
+        sensitive_attr, sensitive_indices = prepare_sensitive_attributes(
+            sensitive_attr=sensitive_attr,
+            num_samples=y_pred.shape[0],
+            sensitive_indices=self.sensitive_indices,
+        )
+
+        y_true = y_true.to(y_pred.device)
+        sensitive_attr = sensitive_attr.to(y_pred.device)
+
+        # ---------------------------------------------------------
+        # 1. Form the intersectional groups.
+        #
+        # Each row of sensitive_attr represents the sensitive
+        # profile of one individual. Equal rows therefore belong
+        # to the same intersectional group.
+        #
+        # Example:
+        #
+        #   sex  race
+        #    0     0   -> group 0
+        #    0     1   -> group 1
+        #    1     0   -> group 2
+        #    0     0   -> group 0
+        #
+        # group_ids contains the intersectional group assigned
+        # to each sample.
+        # ---------------------------------------------------------
+        intersectional_groups, group_ids = torch.unique(
+            sensitive_attr,
+            dim=0,
+            sorted=True,
+            return_inverse=True,
+        )
+
+        # ---------------------------------------------------------
+        # 2. Identify the true classes.
+        # ---------------------------------------------------------
+        classes = torch.unique(y_true, sorted=True)
+
+        class_disparities = []
+
+        # ---------------------------------------------------------
+        # 3. For each class, restrict the samples to individuals
+        #    whose true label is that class.
+        #
+        # Then calculate the true positive rate inside every
+        # intersectional group:
+        #
+        #   TPR(g, c) = P(y_pred = c | y_true = c, G = g)
+        # ---------------------------------------------------------
+        for class_label in classes:
+            class_mask = y_true == class_label
+
+            group_rates = []
+
+            for group_id in range(intersectional_groups.shape[0]):
+                group_mask = (group_ids == group_id) & class_mask
+
+                # The intersectional group may exist in the dataset
+                # but contain no samples from the current class.
+                if group_mask.sum() == 0:
+                    continue
+
+                true_positive_rate = (
+                    y_pred[group_mask] == class_label
+                ).float().mean()
+
+                group_rates.append(true_positive_rate)
+
+            # -----------------------------------------------------
+            # 4. At least two intersectional groups are required
+            #    to define a disparity for the current class.
+            # -----------------------------------------------------
+            if len(group_rates) < 2:
+                class_disparity = y_pred.float().sum() * 0.0
+
+            else:
+                group_rates = torch.stack(group_rates)
+
+                class_disparity = reduce_group_rates(
+                    group_rates=group_rates,
+                    reduction=self.group_reduction,
+                )
+
+            class_disparities.append(class_disparity)
+
+        # ---------------------------------------------------------
+        # 5. Reduce the disparities obtained for all classes into
+        #    the final intersectional equality opportunity metric.
+        # ---------------------------------------------------------
+        total_disparity = reduce_values(
+            values=class_disparities,
+            reduction=self.class_reduction,
+        )
+
+        return total_disparity.item()
