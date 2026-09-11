@@ -176,3 +176,139 @@ class EqualityOpportunityMetric(Metric):
         )
 
         return total_disparity.item()
+
+import torch
+
+from .metric import Metric
+from .reduction import reduce_group_rates, reduce_values
+from .validation import prepare_sensitive_attributes
+
+
+class IntersectionalDemographicParityMetric(Metric):
+    """
+    Demographic parity across intersectional sensitive groups.
+
+    Each distinct combination of sensitive attributes defines one
+    intersectional group.
+
+    For example, if the sensitive attributes are sex and race, the
+    groups are combinations such as:
+
+        (Female, White)
+        (Female, Black)
+        (Male, White)
+        (Male, Black)
+
+    rather than sex and race being evaluated separately.
+    """
+
+    name = "intersectional_ddp"
+    direction = "min"
+    type = "fairness"
+
+    def __init__(
+        self,
+        sensitive_indices=None,
+        class_reduction="mean",
+        group_reduction="max",
+        name=None,
+    ):
+        self.sensitive_indices = sensitive_indices
+        self.class_reduction = class_reduction
+        self.group_reduction = group_reduction
+
+        if name is not None:
+            self.name = name
+
+    def __call__(
+        self,
+        y_true,
+        y_pred,
+        sensitive_attr=None,
+        logits=None,
+    ):
+        y_pred = torch.as_tensor(y_pred).view(-1)
+
+        sensitive_attr, sensitive_indices = prepare_sensitive_attributes(
+            sensitive_attr=sensitive_attr,
+            num_samples=y_pred.shape[0],
+            sensitive_indices=self.sensitive_indices,
+        )
+
+        sensitive_attr = sensitive_attr.to(y_pred.device)
+
+        # ---------------------------------------------------------
+        # 1. Form the intersectional groups.
+        #
+        # Each row of sensitive_attr is the sensitive profile of
+        # one individual. Equal rows therefore belong to the same
+        # intersectional group.
+        #
+        # Example:
+        #
+        #   sex  race
+        #    0     0   -> group 0
+        #    0     1   -> group 1
+        #    1     0   -> group 2
+        #    0     0   -> group 0
+        #
+        # group_ids contains the intersectional group assigned
+        # to each sample.
+        # ---------------------------------------------------------
+        intersectional_groups, group_ids = torch.unique(
+            sensitive_attr,
+            dim=0,
+            sorted=True,
+            return_inverse=True,
+        )
+
+        # ---------------------------------------------------------
+        # 2. Identify the predicted classes.
+        # ---------------------------------------------------------
+        classes = torch.unique(y_pred, sorted=True)
+
+        class_disparities = []
+
+        # ---------------------------------------------------------
+        # 3. For each class, calculate its prediction rate inside
+        #    every intersectional group.
+        #
+        # For class c and intersectional group g:
+        #
+        #   rate(g, c) = P(y_pred = c | G = g)
+        # ---------------------------------------------------------
+        for class_label in classes:
+            class_predictions = (y_pred == class_label).float()
+
+            group_rates = []
+
+            for group_id in range(intersectional_groups.shape[0]):
+                group_mask = group_ids == group_id
+
+                group_rate = class_predictions[group_mask].mean()
+
+                group_rates.append(group_rate)
+
+            group_rates = torch.stack(group_rates)
+
+            # -----------------------------------------------------
+            # 4. Measure the disparity between intersectional
+            #    groups for the current class.
+            # -----------------------------------------------------
+            class_disparity = reduce_group_rates(
+                group_rates=group_rates,
+                reduction=self.group_reduction,
+            )
+
+            class_disparities.append(class_disparity)
+
+        # ---------------------------------------------------------
+        # 5. Reduce the disparities obtained for all classes into
+        #    the final intersectional demographic parity metric.
+        # ---------------------------------------------------------
+        total_disparity = reduce_values(
+            values=class_disparities,
+            reduction=self.class_reduction,
+        )
+
+        return total_disparity.item()
