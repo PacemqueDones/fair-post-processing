@@ -2,6 +2,8 @@ from .objective import Objective
 
 from .performance import (
     CrossEntropyObjective,
+    KLPreservationObjective,
+    JensenShannonPreservationObjective,
 )
 
 from .group import (
