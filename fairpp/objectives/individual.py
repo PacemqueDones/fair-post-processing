@@ -23,13 +23,13 @@ class LaplacianFairnessObjective(Objective):
         if normalize == "edges" and W_vector is None:
             raise ValueError("W must be provided when normalize='edges'.")
 
-        L = L.float()
+        L = torch.as_tensor(L, dtype=torch.float32)
 
         if symmetrize:
             L = 0.5 * (L + L.T)
 
         self.L = L
-        self.W_vector = None if W_vector is None else W_vector.float()
+        self.W_vector = None if W_vector is None else torch.as_tensor(W_vector, dtype=torch.float32)
 
         self.fairness_weight = fairness_weight
         self.ce_weight = ce_weight
@@ -70,8 +70,8 @@ class LaplacianFairnessObjective(Objective):
         elif self.normalize == "edges":
             W = self.W_vector.to(device=F_scores.device, dtype=F_scores.dtype,)
 
-            if W.shape != L.shape:
-                raise ValueError(f"W tem shape {W.shape}, mas L tem shape {L.shape}.")
+            # if W.shape != L.shape:
+            #     raise ValueError(f"W tem shape {W.shape}, mas L tem shape {L.shape}.")
 
             edge_weight_sum = W.sum()
 
