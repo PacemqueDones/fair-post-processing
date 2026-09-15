@@ -523,36 +523,27 @@ class EqualityOpportunityObjective(_MarginalGroupFairnessObjective):
 
 class WassersteinDemographicParityObjective(Objective):
     """
-    Compare group score distributions with a Wasserstein barycenter.
+    Wasserstein Demographic Parity with a static barycenter.
 
-    The objective is computed independently for every predicted class.
-    For ``p=1``, barycenter quantiles are weighted medians. For ``p=2``,
-    they are weighted means. The returned group losses approximate
-    ``W_p``; consequently, ``p=2`` returns squared Wasserstein losses.
+    The barycenter is computed once from the base-model predictions
+    and remains fixed throughout training.
 
-    Parameters
-    ----------
-    p : int, default=2
-        Wasserstein order. Supported values are 1 and 2.
+    For every predicted class c and sensitive group g:
 
-    num_quantiles : int, default=100
-        Number of midpoint quantiles used to approximate the integral
-        over the unit interval.
+        Q^0_{g,c}(u)
+            base-model quantile function
 
-    sensitive_indices : sequence of int or None, default=None
-        Sensitive-attribute columns used by the objective.
+        Q_bar,c(u)
+            fixed Wasserstein barycenter
 
-    grouping : {"marginal", "intersectional"}, default="marginal"
-        Whether sensitive attributes are handled separately or combined
-        into intersectional groups.
+        Q^theta_{g,c}(u)
+            current post-processed quantile function
 
-    class_reduction, group_reduction : {"none", "mean", "sum", "max"}
-        Reductions over predicted classes and sensitive groups.
+    The optimization minimizes the distance
 
-    attribute_reduction : {"none", "mean", "sum", "max"}, None, or omitted
-        In marginal grouping, omission resolves to ``"none"``. In
-        intersectional grouping, omission resolves to ``None`` because
-        there is no marginal attribute axis.
+        W_p(Q^theta_{g,c}, Q_bar,c)
+
+    while Q_bar,c remains unchanged.
     """
 
     name = "wasserstein_demographic_parity"
@@ -572,7 +563,7 @@ class WassersteinDemographicParityObjective(Objective):
     def __init__(
         self,
         fairness_weight=1.0,
-        p=2,
+        p=1,
         num_quantiles=100,
         sensitive_indices=None,
         grouping="marginal",
@@ -608,7 +599,16 @@ class WassersteinDemographicParityObjective(Objective):
         self.class_reduction = class_reduction
         self.group_reduction = group_reduction
         self.attribute_reduction = attribute_reduction
+
         self.name = f"wasserstein_demographic_parity_p{p}"
+
+        # Static barycenters.
+        # Marginal:
+        #     key = original sensitive-attribute index
+        #
+        # Intersectional:
+        #     key = "intersectional"
+        self.barycenters_ = {}
 
         self._validate_configuration()
 
@@ -631,6 +631,7 @@ class WassersteinDemographicParityObjective(Objective):
                     "For grouping='marginal', attribute_reduction "
                     "must be 'none', 'mean', 'sum', or 'max'."
                 )
+
         elif self.attribute_reduction is not None:
             raise ValueError(
                 "attribute_reduction does not apply when "
@@ -656,6 +657,24 @@ class WassersteinDemographicParityObjective(Objective):
                 "group_reduction is 'none'."
             )
 
+    def _base_probabilities(
+        self,
+        base_outputs,
+        input_type,
+    ):
+        """
+        Convert the immutable base-model outputs to probabilities.
+        """
+        if input_type == "probability":
+            return base_outputs
+
+        if input_type == "score":
+            return torch.softmax(base_outputs, dim=1)
+
+        raise ValueError(
+            "input_type must be 'probability' or 'score'."
+        )
+
     def _quantile_levels(self, reference):
         indices = torch.arange(
             self.num_quantiles,
@@ -670,7 +689,11 @@ class WassersteinDemographicParityObjective(Objective):
         probabilities,
         group_codes,
     ):
-        groups = torch.unique(group_codes, sorted=True)
+        groups = torch.unique(
+            group_codes,
+            sorted=True,
+        )
+
         levels = self._quantile_levels(probabilities)
 
         quantiles = []
@@ -678,7 +701,9 @@ class WassersteinDemographicParityObjective(Objective):
         valid_groups = []
 
         for group in groups:
-            group_values = probabilities[group_codes == group]
+            group_values = probabilities[
+                group_codes == group
+            ]
 
             if group_values.shape[0] == 0:
                 continue
@@ -696,29 +721,42 @@ class WassersteinDemographicParityObjective(Objective):
         if not quantiles:
             return None, None, []
 
-        stacked_quantiles = torch.stack(quantiles, dim=0)
+        quantiles = torch.stack(
+            quantiles,
+            dim=0,
+        )
+
         weights = probabilities.new_tensor(counts)
         weights = weights / weights.sum()
 
-        return stacked_quantiles, weights, valid_groups
+        return quantiles, weights, valid_groups
 
     @staticmethod
-    def _weighted_median(quantiles, weights):
-        """Compute weighted medians along the group axis."""
+    def _weighted_median(
+        quantiles,
+        weights,
+    ):
+        """
+        Weighted median along the sensitive-group axis.
+        """
         sorted_quantiles, order = torch.sort(
             quantiles,
             dim=0,
         )
 
-        expanded_weights = weights[:, None, None].expand_as(
-            quantiles
-        )
+        expanded_weights = weights[
+            :, None, None
+        ].expand_as(quantiles)
+
         sorted_weights = torch.gather(
             expanded_weights,
             dim=0,
             index=order,
         )
-        cumulative_weights = sorted_weights.cumsum(dim=0)
+
+        cumulative_weights = sorted_weights.cumsum(
+            dim=0
+        )
 
         median_indices = (
             cumulative_weights >= 0.5
@@ -736,16 +774,23 @@ class WassersteinDemographicParityObjective(Objective):
             index=median_indices.unsqueeze(0),
         ).squeeze(0)
 
-        next_indices = (median_indices + 1).clamp_max(
+        next_indices = (
+            median_indices + 1
+        ).clamp_max(
             quantiles.shape[0] - 1
         )
+
         next_values = torch.gather(
             sorted_quantiles,
             dim=0,
             index=next_indices.unsqueeze(0),
         ).squeeze(0)
 
-        has_next = median_indices < quantiles.shape[0] - 1
+        has_next = (
+            median_indices
+            < quantiles.shape[0] - 1
+        )
+
         tied_half = torch.isclose(
             selected_cumulative,
             selected_cumulative.new_tensor(0.5),
@@ -757,16 +802,57 @@ class WassersteinDemographicParityObjective(Objective):
             selected,
         )
 
-    def _compute_barycenter(self, quantiles, weights):
+    def _compute_barycenter(
+        self,
+        quantiles,
+        weights,
+    ):
+        """
+        Compute the Wasserstein barycenter from base quantiles.
+        """
         if self.p == 1:
             return self._weighted_median(
-                quantiles=quantiles,
-                weights=weights,
+                quantiles,
+                weights,
             )
 
         return (
-            quantiles * weights[:, None, None]
+            quantiles
+            * weights[:, None, None]
         ).sum(dim=0)
+
+    def _get_static_barycenter(
+        self,
+        key,
+        base_probabilities,
+        group_codes,
+    ):
+        """
+        Compute the barycenter only once.
+
+        After the first computation, the stored tensor is reused
+        during all subsequent optimization steps.
+        """
+        if key not in self.barycenters_:
+            with torch.no_grad():
+                quantiles, weights, groups = (
+                    self._compute_group_quantiles(
+                        probabilities=base_probabilities,
+                        group_codes=group_codes,
+                    )
+                )
+
+                if quantiles is None or len(groups) < 2:
+                    return None
+
+                barycenter = self._compute_barycenter(
+                    quantiles=quantiles,
+                    weights=weights,
+                )
+
+                self.barycenters_[key] = barycenter.detach()
+
+        return self.barycenters_[key]
 
     def _reduce_classes(
         self,
@@ -777,6 +863,7 @@ class WassersteinDemographicParityObjective(Objective):
             distances[class_index]
             for class_index in range(distances.shape[0])
         ]
+
         names = [
             f"{group_name}_class_{class_index}"
             for class_index in range(distances.shape[0])
@@ -789,33 +876,39 @@ class WassersteinDemographicParityObjective(Objective):
             reduced_name=group_name,
         )
 
-    def _reduce_groups(
+    def _distances_to_barycenter(
         self,
         quantiles,
-        weights,
+        barycenter,
         group_labels,
         grouping_name,
     ):
-        barycenter = self._compute_barycenter(
-            quantiles=quantiles,
-            weights=weights,
-        )
-
+        """
+        Compare current group quantiles with the fixed barycenter.
+        """
         group_losses = []
         group_names = []
 
-        for group_index, group_label in enumerate(group_labels):
+        for group_index, group_label in enumerate(
+            group_labels
+        ):
             distances = (
                 quantiles[group_index] - barycenter
-            ).abs().pow(self.p).mean(dim=1).pow(1.0 / self.p)
+            ).abs().pow(self.p).mean(
+                dim=1
+            ).pow(
+                1.0 / self.p
+            )
 
             group_name = (
                 f"{grouping_name}_group_{group_label}"
             )
 
-            class_losses, class_names = self._reduce_classes(
-                distances=distances,
-                group_name=group_name,
+            class_losses, class_names = (
+                self._reduce_classes(
+                    distances=distances,
+                    group_name=group_name,
+                )
             )
 
             group_losses.extend(class_losses)
@@ -834,11 +927,15 @@ class WassersteinDemographicParityObjective(Objective):
 
     @staticmethod
     def _format_intersectional_group(group_row):
-        return "_".join(str(value.item()) for value in group_row)
+        return "_".join(
+            str(value.item())
+            for value in group_row
+        )
 
     def _marginal_losses(
         self,
         probabilities,
+        base_probabilities,
         sensitive_attr,
         sensitive_indices,
         logits,
@@ -846,13 +943,35 @@ class WassersteinDemographicParityObjective(Objective):
         losses = []
         names = []
 
-        for local_index, original_index in enumerate(sensitive_indices):
+        for local_index, original_index in enumerate(
+            sensitive_indices
+        ):
             attribute = sensitive_attr[:, local_index]
+
             attribute_name = (
                 f"{self.name}_attribute_{original_index}"
             )
 
-            quantiles, weights, groups = (
+            #
+            # Fixed barycenter from the base model.
+            #
+            barycenter = self._get_static_barycenter(
+                key=original_index,
+                base_probabilities=base_probabilities,
+                group_codes=attribute,
+            )
+
+            if barycenter is None:
+                losses.append(logits.sum() * 0.0)
+                names.append(
+                    f"{attribute_name}_insufficient_groups"
+                )
+                continue
+
+            #
+            # Current post-processed distributions.
+            #
+            quantiles, _, groups = (
                 self._compute_group_quantiles(
                     probabilities=probabilities,
                     group_codes=attribute,
@@ -870,10 +989,11 @@ class WassersteinDemographicParityObjective(Objective):
                 self._format_scalar_group(group)
                 for group in groups
             ]
+
             attribute_losses, attribute_names = (
-                self._reduce_groups(
+                self._distances_to_barycenter(
                     quantiles=quantiles,
-                    weights=weights,
+                    barycenter=barycenter,
                     group_labels=group_labels,
                     grouping_name=attribute_name,
                 )
@@ -892,6 +1012,7 @@ class WassersteinDemographicParityObjective(Objective):
     def _intersectional_losses(
         self,
         probabilities,
+        base_probabilities,
         sensitive_attr,
         logits,
     ):
@@ -901,9 +1022,25 @@ class WassersteinDemographicParityObjective(Objective):
             sorted=True,
             return_inverse=True,
         )
-        grouping_name = f"{self.name}_intersectional"
 
-        quantiles, weights, groups = (
+        grouping_name = (
+            f"{self.name}_intersectional"
+        )
+
+        barycenter = self._get_static_barycenter(
+            key="intersectional",
+            base_probabilities=base_probabilities,
+            group_codes=group_codes,
+        )
+
+        if barycenter is None:
+            zero = logits.sum() * 0.0
+
+            return [zero], [
+                f"{grouping_name}_insufficient_groups"
+            ]
+
+        quantiles, _, groups = (
             self._compute_group_quantiles(
                 probabilities=probabilities,
                 group_codes=group_codes,
@@ -912,18 +1049,21 @@ class WassersteinDemographicParityObjective(Objective):
 
         if quantiles is None or len(groups) < 2:
             zero = logits.sum() * 0.0
+
             return [zero], [
                 f"{grouping_name}_insufficient_groups"
             ]
 
         group_labels = [
-            self._format_intersectional_group(unique_rows[group])
+            self._format_intersectional_group(
+                unique_rows[group]
+            )
             for group in groups
         ]
 
-        return self._reduce_groups(
+        return self._distances_to_barycenter(
             quantiles=quantiles,
-            weights=weights,
+            barycenter=barycenter,
             group_labels=group_labels,
             grouping_name=grouping_name,
         )
@@ -953,18 +1093,29 @@ class WassersteinDemographicParityObjective(Objective):
             )
         )
 
-        probabilities = torch.softmax(logits, dim=1)
+        probabilities = torch.softmax(
+            logits,
+            dim=1,
+        )
+
+        base_probabilities = self._base_probabilities(
+            base_outputs=base_outputs,
+            input_type=input_type,
+        )
 
         if self.grouping == "marginal":
             losses, names = self._marginal_losses(
                 probabilities=probabilities,
+                base_probabilities=base_probabilities,
                 sensitive_attr=sensitive_attr,
                 sensitive_indices=sensitive_indices,
                 logits=logits,
             )
+
         else:
             losses, names = self._intersectional_losses(
                 probabilities=probabilities,
+                base_probabilities=base_probabilities,
                 sensitive_attr=sensitive_attr,
                 logits=logits,
             )
@@ -972,16 +1123,16 @@ class WassersteinDemographicParityObjective(Objective):
         losses = self._apply_fairness_weight(losses)
 
         return losses, names
-    
-class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObjective):
-    """
-    Compare class-conditional group score distributions with a
-    Wasserstein barycenter.
 
-    For each class ``c``, this objective compares the distributions
-    of the predicted score for class ``c`` among observations that
-    satisfy ``Y = c``. The barycenter weights are the empirical group
-    proportions inside that class, ``P(S = s | Y = c)``.
+
+class WassersteinEqualityOpportunityObjective(
+    WassersteinDemographicParityObjective
+):
+    """
+    Wasserstein Equality Opportunity with static barycenters.
+
+    For every class c, the barycenter is computed once using
+    base-model predictions conditional on Y = c.
     """
 
     name = "wasserstein_equality_opportunity"
@@ -989,7 +1140,7 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
     def __init__(
         self,
         fairness_weight=1.0,
-        p=2,
+        p=1,
         num_quantiles=100,
         sensitive_indices=None,
         grouping="marginal",
@@ -1008,21 +1159,35 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
             attribute_reduction=attribute_reduction,
         )
 
-        self.name = f"wasserstein_equality_opportunity_p{p}"
+        self.name = (
+            f"wasserstein_equality_opportunity_p{p}"
+        )
+
+        # EO needs one fixed barycenter for every
+        # attribute/intersection and class.
+        self.barycenters_ = {}
 
     def _conditional_group_losses(
         self,
         probabilities,
+        base_probabilities,
         y_true,
         group_codes,
         group_labels,
         grouping_name,
+        barycenter_prefix,
         logits,
     ):
+        groups = torch.unique(
+            group_codes,
+            sorted=True,
+        )
+
         losses_by_group = {
             int(group.item()): []
-            for group in torch.unique(group_codes, sorted=True)
+            for group in groups
         }
+
         names_by_group = {
             group_code: []
             for group_code in losses_by_group
@@ -1031,20 +1196,54 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
         num_classes = probabilities.shape[1]
 
         for class_index in range(num_classes):
-            class_mask = y_true == class_index
+            class_mask = (
+                y_true == class_index
+            )
 
             if class_mask.sum() == 0:
                 continue
 
-            class_scores = probabilities[
+            #
+            # For EO we only use the score of the true class c.
+            #
+            current_scores = probabilities[
                 class_mask,
                 class_index,
             ].unsqueeze(1)
-            class_group_codes = group_codes[class_mask]
 
-            quantiles, weights, valid_groups = (
+            base_scores = base_probabilities[
+                class_mask,
+                class_index,
+            ].unsqueeze(1)
+
+            class_group_codes = group_codes[
+                class_mask
+            ]
+
+            barycenter_key = (
+                barycenter_prefix,
+                class_index,
+            )
+
+            #
+            # Static barycenter from base predictions
+            # conditional on Y = c.
+            #
+            barycenter = self._get_static_barycenter(
+                key=barycenter_key,
+                base_probabilities=base_scores,
+                group_codes=class_group_codes,
+            )
+
+            if barycenter is None:
+                continue
+
+            #
+            # Current post-processed quantiles.
+            #
+            quantiles, _, valid_groups = (
                 self._compute_group_quantiles(
-                    probabilities=class_scores,
+                    probabilities=current_scores,
                     group_codes=class_group_codes,
                 )
             )
@@ -1052,31 +1251,41 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
             if quantiles is None or len(valid_groups) < 2:
                 continue
 
-            barycenter = self._compute_barycenter(
-                quantiles=quantiles,
-                weights=weights,
-            )
-
-            for local_group_index, group in enumerate(valid_groups):
+            for local_group_index, group in enumerate(
+                valid_groups
+            ):
                 group_code = int(group.item())
+
                 distance = (
-                    quantiles[local_group_index] - barycenter
-                ).abs().pow(self.p).mean().pow(1.0 / self.p)
+                    quantiles[local_group_index]
+                    - barycenter
+                ).abs().pow(
+                    self.p
+                ).mean().pow(
+                    1.0 / self.p
+                )
 
                 group_name = (
                     f"{grouping_name}_group_"
                     f"{group_labels[group_code]}"
                 )
 
-                losses_by_group[group_code].append(distance)
-                names_by_group[group_code].append(
+                losses_by_group[
+                    group_code
+                ].append(distance)
+
+                names_by_group[
+                    group_code
+                ].append(
                     f"{group_name}_class_{class_index}"
                 )
 
         group_losses = []
         group_names = []
 
-        for group_code, class_losses in losses_by_group.items():
+        for group_code, class_losses in (
+            losses_by_group.items()
+        ):
             if not class_losses:
                 continue
 
@@ -1084,11 +1293,14 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
                 f"{grouping_name}_group_"
                 f"{group_labels[group_code]}"
             )
-            reduced_losses, reduced_names = reduce_losses(
-                losses=class_losses,
-                names=names_by_group[group_code],
-                reduction=self.class_reduction,
-                reduced_name=group_name,
+
+            reduced_losses, reduced_names = (
+                reduce_losses(
+                    losses=class_losses,
+                    names=names_by_group[group_code],
+                    reduction=self.class_reduction,
+                    reduced_name=group_name,
+                )
             )
 
             group_losses.extend(reduced_losses)
@@ -1096,6 +1308,7 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
 
         if not group_losses:
             zero = logits.sum() * 0.0
+
             return [zero], [
                 f"{grouping_name}_insufficient_groups"
             ]
@@ -1110,6 +1323,7 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
     def _marginal_conditional_losses(
         self,
         probabilities,
+        base_probabilities,
         y_true,
         sensitive_attr,
         sensitive_indices,
@@ -1118,24 +1332,35 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
         losses = []
         names = []
 
-        for local_index, original_index in enumerate(sensitive_indices):
+        for local_index, original_index in enumerate(
+            sensitive_indices
+        ):
             attribute = sensitive_attr[:, local_index]
+
             attribute_name = (
                 f"{self.name}_attribute_{original_index}"
             )
-            groups = torch.unique(attribute, sorted=True)
+
+            groups = torch.unique(
+                attribute,
+                sorted=True,
+            )
+
             group_labels = {
-                int(group.item()): self._format_scalar_group(group)
+                int(group.item()):
+                    self._format_scalar_group(group)
                 for group in groups
             }
 
             attribute_losses, attribute_names = (
                 self._conditional_group_losses(
                     probabilities=probabilities,
+                    base_probabilities=base_probabilities,
                     y_true=y_true,
                     group_codes=attribute,
                     group_labels=group_labels,
                     grouping_name=attribute_name,
+                    barycenter_prefix=original_index,
                     logits=logits,
                 )
             )
@@ -1153,6 +1378,7 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
     def _intersectional_conditional_losses(
         self,
         probabilities,
+        base_probabilities,
         y_true,
         sensitive_attr,
         logits,
@@ -1163,21 +1389,32 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
             sorted=True,
             return_inverse=True,
         )
-        grouping_name = f"{self.name}_intersectional"
-        groups = torch.unique(group_codes, sorted=True)
+
+        grouping_name = (
+            f"{self.name}_intersectional"
+        )
+
+        groups = torch.unique(
+            group_codes,
+            sorted=True,
+        )
+
         group_labels = {
-            int(group.item()): self._format_intersectional_group(
-                unique_rows[group]
-            )
+            int(group.item()):
+                self._format_intersectional_group(
+                    unique_rows[group]
+                )
             for group in groups
         }
 
         return self._conditional_group_losses(
             probabilities=probabilities,
+            base_probabilities=base_probabilities,
             y_true=y_true,
             group_codes=group_codes,
             group_labels=group_labels,
             grouping_name=grouping_name,
+            barycenter_prefix="intersectional",
             logits=logits,
         )
 
@@ -1197,24 +1434,41 @@ class WassersteinEqualityOpportunityObjective(WassersteinDemographicParityObject
             )
         )
 
-        probabilities = torch.softmax(logits, dim=1)
+        probabilities = torch.softmax(
+            logits,
+            dim=1,
+        )
+
+        base_probabilities = self._base_probabilities(
+            base_outputs=base_outputs,
+            input_type=input_type,
+        )
 
         if self.grouping == "marginal":
-            losses, names = self._marginal_conditional_losses(
-                probabilities=probabilities,
-                y_true=y_true,
-                sensitive_attr=sensitive_attr,
-                sensitive_indices=sensitive_indices,
-                logits=logits,
-            )
-        else:
-            losses, names = self._intersectional_conditional_losses(
-                probabilities=probabilities,
-                y_true=y_true,
-                sensitive_attr=sensitive_attr,
-                logits=logits,
+            losses, names = (
+                self._marginal_conditional_losses(
+                    probabilities=probabilities,
+                    base_probabilities=base_probabilities,
+                    y_true=y_true,
+                    sensitive_attr=sensitive_attr,
+                    sensitive_indices=sensitive_indices,
+                    logits=logits,
+                )
             )
 
-        losses = self._apply_fairness_weight(losses)
+        else:
+            losses, names = (
+                self._intersectional_conditional_losses(
+                    probabilities=probabilities,
+                    base_probabilities=base_probabilities,
+                    y_true=y_true,
+                    sensitive_attr=sensitive_attr,
+                    logits=logits,
+                )
+            )
+
+        losses = self._apply_fairness_weight(
+            losses
+        )
 
         return losses, names
