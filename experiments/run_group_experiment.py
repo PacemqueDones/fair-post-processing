@@ -85,14 +85,15 @@ def infer_category_sizes(sensitive_attr):
 # Configurações do experimento
 #-----------------------------------------------------------------------------
 
-DATASETS = ["dutch"]
+DATASETS = ["adult"]
 SEEDS = [41]
 
 EPOCHS = 230
-LR = 5.24
+LR = 1
 ALPHA = 1.0
+FAIRNESS_WEIGHT=30
 
-P=2
+P=1
 
 PROJECT_DIR = Path(__file__).resolve().parents[2] / 'fair-post-process_experiments' 
 ARTIFACTS_DIR = PROJECT_DIR / "artifacts"
@@ -155,6 +156,7 @@ for dataset in DATASETS:
                     KLPreservationObjective(),
                     WassersteinDemographicParityObjective(
                         p=P,
+                        fairness_weight=FAIRNESS_WEIGHT,
                         attribute_reduction="none",
                         group_reduction="none",
                         class_reduction="none",

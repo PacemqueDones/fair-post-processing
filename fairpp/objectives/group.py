@@ -600,7 +600,7 @@ class WassersteinDemographicParityObjective(Objective):
         self.group_reduction = group_reduction
         self.attribute_reduction = attribute_reduction
 
-        self.name = f"wasserstein_demographic_parity_p{p}"
+        self.name = f"wasserstein_demographic_parity_{grouping}_p{p}"
 
         # Static barycenters.
         # Marginal:
@@ -1023,9 +1023,7 @@ class WassersteinDemographicParityObjective(Objective):
             return_inverse=True,
         )
 
-        grouping_name = (
-            f"{self.name}_intersectional"
-        )
+        grouping_name = self.name
 
         barycenter = self._get_static_barycenter(
             key="intersectional",
@@ -1160,7 +1158,7 @@ class WassersteinEqualityOpportunityObjective(
         )
 
         self.name = (
-            f"wasserstein_equality_opportunity_p{p}"
+            f"wasserstein_equality_opportunity_{grouping}_p{p}"
         )
 
         # EO needs one fixed barycenter for every
@@ -1390,9 +1388,7 @@ class WassersteinEqualityOpportunityObjective(
             return_inverse=True,
         )
 
-        grouping_name = (
-            f"{self.name}_intersectional"
-        )
+        grouping_name = self.name
 
         groups = torch.unique(
             group_codes,

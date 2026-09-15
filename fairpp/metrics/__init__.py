@@ -11,6 +11,8 @@ from .performance import (
 from .group import (
     DemographicParityMetric,
     EqualityOpportunityMetric,
+    IntersectionalDemographicParityMetric,
+    IntersectionalEqualityOpportunityMetric,
 )
 
 from .individual import (
@@ -30,6 +32,8 @@ __all__ = [
     "F1ScoreMetric",
     "DemographicParityMetric",
     "EqualityOpportunityMetric",
+    "IntersectionalDemographicParityMetric",
+    "IntersectionalEqualityOpportunityMetric"
     "IndividualFairnessViolationMeanMetric",
     "IndividualFairnessViolationRateMetric",
     "SampledIndividualFairnessViolationRateMetric",
