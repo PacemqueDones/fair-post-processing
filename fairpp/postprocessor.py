@@ -220,6 +220,43 @@ class FairPostProcessor:
 
         self.model.load_state_dict(self.best_model_state_)
 
+    def _evaluate_validation(
+        self,
+        val_inputs,
+        val_y_true,
+        val_sensitive_attr,
+        val_X,
+    ):
+        self.model.eval()
+
+        with torch.no_grad():
+            val_logits = self.model(
+                inputs=val_inputs,
+                sensitive_attr=val_sensitive_attr,
+                X=val_X,
+            )
+
+            val_y_pred = torch.argmax(
+                val_logits,
+                dim=1,
+            )
+
+            metric_dict = {}
+            point = []
+
+            for metric in self.selection_metrics:
+                value = metric(
+                    y_true=val_y_true,
+                    y_pred=val_y_pred,
+                    sensitive_attr=val_sensitive_attr,
+                    logits=val_logits,
+                )
+
+                metric_dict[metric.name] = value
+                point.append(value)
+
+        return metric_dict, point
+
 
     def fit(
         self,
@@ -251,6 +288,28 @@ class FairPostProcessor:
 
         self._reset_fit_state()
 
+        initial_metrics, initial_point = (
+            self._evaluate_validation(
+                val_inputs,
+                val_y_true,
+                val_sensitive_attr,
+                val_X,
+            )
+        )
+
+        self.history_.append(
+            {
+                "epoch": 0,
+                "losses": {},
+                "metrics": initial_metrics,
+                "point": initial_point,
+                "model_state": {
+                    name: tensor.detach().clone().cpu()
+                    for name, tensor in self.model.state_dict().items()
+                },
+            }
+        )
+
         for epoch in range(self.epochs):
             self.model.train()
 
@@ -271,36 +330,25 @@ class FairPostProcessor:
 
             optimizer.step()
 
-            self.model.eval()
+            metric_dict, point = self._evaluate_validation(
+                val_inputs,
+                val_y_true,
+                val_sensitive_attr,
+                val_X,
+            )
 
-            with torch.no_grad():
-                val_logits = self.model(inputs=val_inputs, sensitive_attr=val_sensitive_attr, X=val_X)
+            epoch_record = {
+                "epoch": epoch + 1,
+                "losses": loss_dict,
+                "metrics": metric_dict,
+                "point": point,
+                "model_state": {
+                    name: tensor.detach().clone().cpu()
+                    for name, tensor in self.model.state_dict().items()
+                },
+            }
 
-                val_y_pred = torch.argmax(val_logits, dim=1)
-
-                metric_dict = {}
-                point = []
-
-                for metric in self.selection_metrics:
-                    value = metric(
-                        y_true=val_y_true,
-                        y_pred=val_y_pred,
-                        sensitive_attr=val_sensitive_attr,
-                        logits=val_logits,
-                    )
-
-                    metric_dict[metric.name] = value
-                    point.append(value)
-
-                epoch_record = {
-                    "epoch": epoch,
-                    "losses": loss_dict,
-                    "metrics": metric_dict,
-                    "point": point,
-                    "model_state": { name: tensor.detach().clone().cpu() for name, tensor in self.model.state_dict().items()},
-                }
-
-                self.history_.append(epoch_record)
+            self.history_.append(epoch_record)
 
         self._select_best_solution()
 
