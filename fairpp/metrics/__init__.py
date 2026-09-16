@@ -33,7 +33,7 @@ __all__ = [
     "DemographicParityMetric",
     "EqualityOpportunityMetric",
     "IntersectionalDemographicParityMetric",
-    "IntersectionalEqualityOpportunityMetric"
+    "IntersectionalEqualityOpportunityMetric",
     "IndividualFairnessViolationMeanMetric",
     "IndividualFairnessViolationRateMetric",
     "SampledIndividualFairnessViolationRateMetric",
