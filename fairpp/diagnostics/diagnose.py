@@ -28,8 +28,11 @@ def to_jsonable(value):
 
 
 def save_json(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
     with open(path, "w", encoding="utf-8") as file:
-        json.dump(to_jsonable(data), file, ensure_ascii=False, indent=4)
+        json.dump(data, file, indent=4)
 
 
 def history_matrix(post, field, columns=None):
