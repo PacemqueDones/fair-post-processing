@@ -45,3 +45,9 @@ experiments/fronteira-pareto.png
 *.egg-info/
 build/
 dist/
+
+# ==========================================
+# 6. Arquivo para definir commit
+# ==========================================
+
+mudancas.txt
