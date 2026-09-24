@@ -192,7 +192,12 @@ for dataset in DATASETS:
 
             diagnose_postprocessor(
                 post=postprocessor,
-                output_dir=fold_dir
+                output_dir=fold_dir,
+                run_config={
+                    "dataset": dataset,
+                    "seed": seed,
+                    "fold": fold,
+                },
             )
 
             preds_post = postprocessor.predict(inputs=probs_test, sensitive_attr=S_test)
